@@ -7,6 +7,7 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="api.js"></script>
     <style>
         /* Elegant Professional Design */
         :root {
@@ -1119,217 +1120,190 @@
         <div id="toast" class="toast hidden"></div>
     </div>
 
-    <script>
-        // ==================== GLOBAL VARIABLES ====================
-        let currentUser = null;
-        let timeRecords = JSON.parse(localStorage.getItem('ce_time_records')) || [];
-        let currentTimer = null;
-        let timerInterval = null;
-        let totalSeconds = 0;
-        let weeklyChart = null;
-        let projectChart = null;
+  <script>
+    // ==================== GLOBAL VARIABLES ====================
+    const api = window.api;
+    let currentUser = null;
+    let timeRecords = [];
+    let currentTimer = null;
+    let timerInterval = null;
+    let totalSeconds = 0;
+    let weeklyChart = null;
+    let projectChart = null;
 
-        // ==================== INITIALIZATION ====================
-        document.addEventListener('DOMContentLoaded', function() {
-            // Initialize default data
-            initializeDefaultData();
-            
-            // Check if user is already logged in
-            const savedUserId = sessionStorage.getItem('ce_current_employee');
-            if (savedUserId) {
-                const userId = JSON.parse(savedUserId);
-                const allUsers = JSON.parse(localStorage.getItem('ce_users')) || [];
-                currentUser = allUsers.find(u => u.id === userId);
-                
-                if (currentUser) {
-                    document.getElementById('loginPage').style.display = 'none';
-                    document.getElementById('dashboardPage').style.display = 'block';
-                    initializeDashboard();
-                }
-            }
-            
-            // Set up event listeners
-            setupEventListeners();
-        });
-
-     function initializeDefaultData() {
-    let allUsers = JSON.parse(localStorage.getItem('ce_users')) || [];
-    if (allUsers.length === 0) {
-        // No default employees - admin must add them
-        localStorage.setItem('ce_users', JSON.stringify([]));
-    }
-    
-    // Initialize time records if empty
-    if (timeRecords.length === 0) {
-        localStorage.setItem('ce_time_records', JSON.stringify([]));
-        timeRecords = [];
-    }
-}
-
-        function setupEventListeners() {
-            // User menu toggle
-            document.getElementById('userMenuBtn').addEventListener('click', function(e) {
-                e.stopPropagation();
-                const dropdown = document.getElementById('userDropdown');
-                dropdown.classList.toggle('hidden');
-            });
-            
-            // Close dropdown when clicking outside
-            document.addEventListener('click', function(e) {
-                if (!document.getElementById('userMenuBtn').contains(e.target)) {
-                    document.getElementById('userDropdown').classList.add('hidden');
-                }
-            });
+    // ==================== INITIALIZATION ====================
+    document.addEventListener('DOMContentLoaded', function() {
+        // Check if user is already logged in
+        const savedUserId = sessionStorage.getItem('ce_current_employee');
+        if (savedUserId && api.currentUser) {
+            currentUser = api.currentUser;
+            document.getElementById('loginPage').style.display = 'none';
+            document.getElementById('dashboardPage').style.display = 'block';
+            initializeDashboard();
         }
+        
+        setupEventListeners();
+        
+        // Initialize date/time fields in modal
+        const now = new Date();
+        const oneHourAgo = new Date(now.getTime() - 3600000);
+        
+        if (document.getElementById('manualStartTime')) {
+            document.getElementById('manualStartTime').value = formatDateTimeLocal(oneHourAgo);
+            document.getElementById('manualEndTime').value = formatDateTimeLocal(now);
+        }
+    });
 
-        // ==================== AUTHENTICATION ====================
-        function login() {
-            const email = document.getElementById('loginEmail').value.trim().toLowerCase();
-            const password = document.getElementById('loginPassword').value;
-            
-            if (!email || !password) {
-                showToast('Please enter email and password', 'error');
-                return;
+    function setupEventListeners() {
+        // User menu toggle
+        document.getElementById('userMenuBtn').addEventListener('click', function(e) {
+            e.stopPropagation();
+            const dropdown = document.getElementById('userDropdown');
+            dropdown.classList.toggle('hidden');
+        });
+        
+        // Close dropdown when clicking outside
+        document.addEventListener('click', function(e) {
+            if (!document.getElementById('userMenuBtn').contains(e.target)) {
+                document.getElementById('userDropdown').classList.add('hidden');
             }
-            
-            const allUsers = JSON.parse(localStorage.getItem('ce_users')) || [];
-            const user = allUsers.find(u => u.email.toLowerCase() === email);
-            
-            if (!user) {
-                showToast('Account not found. Please contact administrator.', 'error');
-                return;
+        });
+        
+        // Auto-save timer every 30 seconds
+        setInterval(() => {
+            if (currentTimer) {
+                // Timer state is managed on the server, but we keep local backup
+                localStorage.setItem('current_employee_timer', JSON.stringify({
+                    id: currentTimer.id,
+                    task: currentTimer.task,
+                    project: currentTimer.project,
+                    startTime: currentTimer.startTime,
+                    totalSeconds: totalSeconds
+                }));
             }
-            
-            if (user.password !== password) {
-                showToast('Invalid password', 'error');
-                return;
-            }
-            
-            if (user.role !== 'employee') {
-                showToast('Access denied. Employee access only.', 'error');
-                return;
-            }
-            
-            currentUser = user;
-            sessionStorage.setItem('ce_current_employee', JSON.stringify(user.id));
+        }, 30000);
+    }
+
+    // ==================== AUTHENTICATION ====================
+    async function login() {
+        const email = document.getElementById('loginEmail').value.trim().toLowerCase();
+        const password = document.getElementById('loginPassword').value;
+        
+        if (!email || !password) {
+            showToast('Please enter email and password', 'error');
+            return;
+        }
+        
+        try {
+            const response = await api.employeeLogin(email, password);
+            currentUser = response.user;
             
             document.getElementById('loginPage').style.display = 'none';
             document.getElementById('dashboardPage').style.display = 'block';
             
             showToast('Login successful! Welcome back.', 'success');
-            initializeDashboard();
+            await initializeDashboard();
+        } catch (error) {
+            showToast('Login failed: ' + error.message, 'error');
         }
+    }
 
-        function logout() {
-            currentUser = null;
-            sessionStorage.removeItem('ce_current_employee');
-            
-            if (currentTimer) {
-                stopTimer();
-            }
-            
-            document.getElementById('dashboardPage').style.display = 'none';
-            document.getElementById('loginPage').style.display = 'flex';
-            
-            showToast('Signed out successfully', 'info');
+    function logout() {
+        if (currentTimer) {
+            stopTimer();
         }
+        
+        api.clearAuth();
+        currentUser = null;
+        
+        document.getElementById('dashboardPage').style.display = 'none';
+        document.getElementById('loginPage').style.display = 'flex';
+        
+        showToast('Signed out successfully', 'info');
+    }
 
-        function showSignup() {
-            showToast('Please contact your administrator to create an account', 'info');
+    function showSignup() {
+        showToast('Please contact your administrator to create an account', 'info');
+    }
+
+    function showResetPassword() {
+        showToast('Please contact your administrator to reset password', 'info');
+    }
+
+    // ==================== DASHBOARD INITIALIZATION ====================
+    async function initializeDashboard() {
+        if (!currentUser) {
+            logout();
+            return;
         }
+        
+        updateUserInfo();
+        updateDateTime();
+        setInterval(updateDateTime, 60000);
+        
+        await updateDashboardStats();
+        await loadDashboardActivity();
+        await loadProjectFilter();
+        await checkForActiveTimer();
+        initializeCharts();
+        
+        setInterval(updateDashboardStats, 30000);
+        updateLastSync();
+        
+        switchTab('dashboard');
+    }
 
-        function showResetPassword() {
-            showToast('Please contact your administrator to reset password', 'info');
+    function updateUserInfo() {
+        if (!currentUser) return;
+        
+        const avatarText = currentUser.firstName[0] + currentUser.lastName[0];
+        
+        document.getElementById('userAvatar').textContent = avatarText;
+        document.getElementById('userName').textContent = `${currentUser.firstName} ${currentUser.lastName}`;
+        document.getElementById('dropdownName').textContent = `${currentUser.firstName} ${currentUser.lastName}`;
+        document.getElementById('dropdownEmail').textContent = currentUser.email;
+        
+        document.getElementById('profileAvatar').textContent = avatarText;
+        document.getElementById('profileName').textContent = `${currentUser.firstName} ${currentUser.lastName}`;
+        document.getElementById('profileEmailDisplay').textContent = currentUser.email;
+        document.getElementById('profileFirstName').value = currentUser.firstName;
+        document.getElementById('profileLastName').value = currentUser.lastName;
+        document.getElementById('profileEmail').value = currentUser.email;
+        document.getElementById('profileEmployeeId').value = currentUser.employeeId || currentUser.id.substring(0, 8).toUpperCase();
+        document.getElementById('memberSince').textContent = new Date(currentUser.createdAt || Date.now()).getFullYear();
+    }
+
+    function updateDateTime() {
+        const now = new Date();
+        const options = { 
+            weekday: 'long', 
+            year: 'numeric', 
+            month: 'long', 
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+        };
+        document.getElementById('currentDateTime').textContent = now.toLocaleDateString('en-US', options);
+    }
+
+    function updateLastSync() {
+        const now = new Date();
+        document.getElementById('lastSync').textContent = now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+    }
+
+    // ==================== TIMER FUNCTIONS ====================
+    async function startTimer() {
+        const task = document.getElementById('taskInput').value.trim();
+        const project = document.getElementById('projectSelect').value;
+        
+        if (!task) {
+            showToast('Please describe what you are working on', 'error');
+            return;
         }
-
-        // ==================== DASHBOARD INITIALIZATION ====================
-        function initializeDashboard() {
-            if (!currentUser) {
-                logout();
-                return;
-            }
-            
-            updateUserInfo();
-            updateDateTime();
-            setInterval(updateDateTime, 60000);
-            
-            updateDashboardStats();
-            loadDashboardActivity();
-            loadProjectFilter();
-            checkForActiveTimer();
-            initializeCharts();
-            
-            setInterval(updateDashboardStats, 30000);
-            setInterval(updateLastSync, 30000);
-            
-            switchTab('dashboard');
-        }
-
-        function updateUserInfo() {
-            if (!currentUser) return;
-            
-            const avatarText = currentUser.firstName[0] + currentUser.lastName[0];
-            
-            document.getElementById('userAvatar').textContent = avatarText;
-            document.getElementById('userName').textContent = `${currentUser.firstName} ${currentUser.lastName}`;
-            document.getElementById('dropdownName').textContent = `${currentUser.firstName} ${currentUser.lastName}`;
-            document.getElementById('dropdownEmail').textContent = currentUser.email;
-            
-            document.getElementById('profileAvatar').textContent = avatarText;
-            document.getElementById('profileName').textContent = `${currentUser.firstName} ${currentUser.lastName}`;
-            document.getElementById('profileEmailDisplay').textContent = currentUser.email;
-            document.getElementById('profileFirstName').value = currentUser.firstName;
-            document.getElementById('profileLastName').value = currentUser.lastName;
-            document.getElementById('profileEmail').value = currentUser.email;
-            document.getElementById('profileEmployeeId').value = currentUser.employeeId || currentUser.id.substring(0, 8).toUpperCase();
-            document.getElementById('memberSince').textContent = new Date(currentUser.createdAt).getFullYear();
-        }
-
-        function updateDateTime() {
-            const now = new Date();
-            const options = { 
-                weekday: 'long', 
-                year: 'numeric', 
-                month: 'long', 
-                day: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit'
-            };
-            document.getElementById('currentDateTime').textContent = now.toLocaleDateString('en-US', options);
-        }
-
-        function updateLastSync() {
-            const now = new Date();
-            document.getElementById('lastSync').textContent = now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-        }
-
-        // ==================== TIMER FUNCTIONS ====================
-        function startTimer() {
-            const task = document.getElementById('taskInput').value.trim();
-            const project = document.getElementById('projectSelect').value;
-            
-            if (!task) {
-                showToast('Please describe what you are working on', 'error');
-                return;
-            }
-            
-            if (currentTimer) {
-                stopTimer();
-            }
-            
-            currentTimer = {
-                id: 'timer_' + Date.now(),
-                userId: currentUser.id,
-                userName: `${currentUser.firstName} ${currentUser.lastName}`,
-                userEmail: currentUser.email,
-                project: project,
-                task: task,
-                startTime: new Date().toISOString(),
-                isRunning: true,
-                isPaused: false
-            };
-            
-            localStorage.setItem('current_employee_timer', JSON.stringify(currentTimer));
+        
+        try {
+            const response = await api.startTimer(project, task);
+            currentTimer = response.timer;
             
             totalSeconds = 0;
             timerInterval = setInterval(() => {
@@ -1349,30 +1323,20 @@
             updateTimerDisplay();
             updateTimerInfo();
             showToast('Timer started', 'success');
-            updateDashboardStats();
+            await updateDashboardStats();
             updateCurrentSessionInfo();
+        } catch (error) {
+            showToast('Failed to start timer: ' + error.message, 'error');
         }
+    }
 
-        function stopTimer() {
-            if (!currentTimer) return;
-            
-            clearInterval(timerInterval);
-            
-            const endTime = new Date().toISOString();
-            const duration = formatDuration(totalSeconds);
-            
-            const timeRecord = {
-                ...currentTimer,
-                endTime: endTime,
-                duration: duration,
-                durationSeconds: totalSeconds,
-                isRunning: false,
-                date: new Date().toISOString().split('T')[0],
-                recordedAt: new Date().toISOString()
-            };
-            
-            timeRecords.push(timeRecord);
-            localStorage.setItem('ce_time_records', JSON.stringify(timeRecords));
+    async function stopTimer() {
+        if (!currentTimer) return;
+        
+        clearInterval(timerInterval);
+        
+        try {
+            const response = await api.stopTimer(currentTimer.id);
             
             currentTimer = null;
             localStorage.removeItem('current_employee_timer');
@@ -1389,16 +1353,30 @@
             
             showToast('Timer stopped and saved', 'success');
             
-            updateDashboardStats();
-            loadDashboardActivity();
+            await updateDashboardStats();
+            await loadDashboardActivity();
             updateCurrentSessionInfo();
             if (document.getElementById('history').classList.contains('active')) {
-                filterHistory();
+                await filterHistory();
             }
+        } catch (error) {
+            showToast('Failed to stop timer: ' + error.message, 'error');
+            // Restart the timer interval if stop failed
+            timerInterval = setInterval(() => {
+                totalSeconds++;
+                updateTimerDisplay();
+                updateTimerInfo();
+            }, 1000);
         }
+    }
 
-        function pauseTimer() {
-            if (!currentTimer) return;
+    async function pauseTimer() {
+        if (!currentTimer) return;
+        
+        const action = currentTimer.isPaused ? 'resume' : 'pause';
+        
+        try {
+            await api.pauseTimer(currentTimer.id, action);
             
             if (!currentTimer.isPaused) {
                 clearInterval(timerInterval);
@@ -1421,175 +1399,177 @@
             }
             
             localStorage.setItem('current_employee_timer', JSON.stringify(currentTimer));
+        } catch (error) {
+            showToast('Failed to update timer: ' + error.message, 'error');
         }
+    }
 
-        function updateTimerDisplay() {
-            const timerDisplay = document.getElementById('timerDisplay');
-            const hours = Math.floor(totalSeconds / 3600);
-            const minutes = Math.floor((totalSeconds % 3600) / 60);
-            const seconds = totalSeconds % 60;
+    function updateTimerDisplay() {
+        const timerDisplay = document.getElementById('timerDisplay');
+        const hours = Math.floor(totalSeconds / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        const seconds = totalSeconds % 60;
+        
+        timerDisplay.textContent = 
+            `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    }
+
+    function updateTimerInfo() {
+        if (currentTimer) {
+            document.getElementById('currentTimerInfo').textContent = 
+                currentTimer.isPaused ? 'Paused' : `Working on: ${currentTimer.task}`;
+        } else {
+            document.getElementById('currentTimerInfo').textContent = 'Ready to start working';
+        }
+    }
+
+    async function checkForActiveTimer() {
+        try {
+            const stats = await api.getEmployeeDashboardStats();
             
-            timerDisplay.textContent = 
-                `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-        }
-
-        function updateTimerInfo() {
-            if (currentTimer) {
-                document.getElementById('currentTimerInfo').textContent = 
-                    currentTimer.isPaused ? 'Paused' : `Working on: ${currentTimer.task}`;
-            } else {
-                document.getElementById('currentTimerInfo').textContent = 'Ready to start working';
-            }
-        }
-
-        function checkForActiveTimer() {
-            const savedTimer = localStorage.getItem('current_employee_timer');
-            if (savedTimer) {
-                const timer = JSON.parse(savedTimer);
+            if (stats.success && stats.stats.activeTimer) {
+                currentTimer = stats.stats.activeTimer;
                 
-                if (timer.userId === currentUser.id) {
-                    currentTimer = timer;
-                    
-                    const startTime = new Date(timer.startTime);
-                    const now = new Date();
-                    totalSeconds = Math.floor((now - startTime) / 1000);
-                    
-                    timerInterval = setInterval(() => {
-                        totalSeconds++;
-                        updateTimerDisplay();
-                        updateTimerInfo();
-                    }, 1000);
-                    
-                    document.getElementById('startBtn').classList.add('hidden');
-                    document.getElementById('stopBtn').classList.remove('hidden');
-                    document.getElementById('pauseBtn').classList.remove('hidden');
-                    document.getElementById('taskInput').value = timer.task;
-                    document.getElementById('projectSelect').value = timer.project;
-                    document.getElementById('taskInput').disabled = true;
-                    document.getElementById('projectSelect').disabled = true;
-                    document.getElementById('currentStatus').textContent = timer.isPaused ? 'Paused' : 'Working';
-                    document.getElementById('statusDetail').textContent = timer.isPaused ? 'Timer paused' : `On: ${timer.task}`;
-                    
-                    if (timer.isPaused) {
-                        document.getElementById('pauseBtn').innerHTML = '<i class="fas fa-play"></i><span>Resume</span>';
-                        clearInterval(timerInterval);
-                    }
-                    
+                // Calculate elapsed seconds
+                const startTime = new Date(currentTimer.startTime);
+                const now = new Date();
+                totalSeconds = Math.floor((now - startTime) / 1000);
+                
+                timerInterval = setInterval(() => {
+                    totalSeconds++;
                     updateTimerDisplay();
                     updateTimerInfo();
-                    showToast('Resumed previous timer', 'info');
+                }, 1000);
+                
+                document.getElementById('startBtn').classList.add('hidden');
+                document.getElementById('stopBtn').classList.remove('hidden');
+                document.getElementById('pauseBtn').classList.remove('hidden');
+                document.getElementById('taskInput').value = currentTimer.task;
+                document.getElementById('projectSelect').value = currentTimer.project;
+                document.getElementById('taskInput').disabled = true;
+                document.getElementById('projectSelect').disabled = true;
+                document.getElementById('currentStatus').textContent = currentTimer.isPaused ? 'Paused' : 'Working';
+                document.getElementById('statusDetail').textContent = currentTimer.isPaused ? 'Timer paused' : `On: ${currentTimer.task}`;
+                
+                if (currentTimer.isPaused) {
+                    document.getElementById('pauseBtn').innerHTML = '<i class="fas fa-play"></i><span>Resume</span>';
+                    clearInterval(timerInterval);
                 }
+                
+                updateTimerDisplay();
+                updateTimerInfo();
+                showToast('Resumed previous timer', 'info');
             }
             
             updateCurrentSessionInfo();
+        } catch (error) {
+            console.error('Error checking for active timer:', error);
         }
+    }
 
-        function updateCurrentSessionInfo() {
-            const container = document.getElementById('currentSessionInfo');
+    function updateCurrentSessionInfo() {
+        const container = document.getElementById('currentSessionInfo');
+        
+        if (currentTimer) {
+            container.innerHTML = `
+                <div class="space-y-3">
+                    <div class="flex justify-between">
+                        <span class="text-gray-600">Project:</span>
+                        <span class="font-medium">${currentTimer.project}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-600">Task:</span>
+                        <span class="font-medium">${currentTimer.task}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-600">Started:</span>
+                        <span class="font-medium">${new Date(currentTimer.startTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-600">Duration:</span>
+                        <span class="font-medium">${formatDuration(totalSeconds)}</span>
+                    </div>
+                    <div class="pt-3">
+                        <span class="badge ${currentTimer.isPaused ? 'badge-warning' : 'badge-success'}">
+                            ${currentTimer.isPaused ? '⏸️ Paused' : '▶️ Active'}
+                        </span>
+                    </div>
+                </div>
+            `;
+        } else {
+            container.innerHTML = `
+                <div class="text-center py-6 text-gray-400">
+                    <i class="fas fa-clock text-4xl mb-3"></i>
+                    <p>No active session</p>
+                    <p class="text-sm mt-1">Start a timer to begin tracking</p>
+                </div>
+            `;
+        }
+    }
+
+    // ==================== DASHBOARD STATS & CHARTS ====================
+    async function updateDashboardStats() {
+        if (!currentUser) return;
+        
+        try {
+            const statsData = await api.getEmployeeDashboardStats();
             
-            if (currentTimer) {
-                container.innerHTML = `
-                    <div class="space-y-3">
-                        <div class="flex justify-between">
-                            <span class="text-gray-600">Project:</span>
-                            <span class="font-medium">${currentTimer.project}</span>
-                        </div>
-                        <div class="flex justify-between">
-                            <span class="text-gray-600">Task:</span>
-                            <span class="font-medium">${currentTimer.task}</span>
-                        </div>
-                        <div class="flex justify-between">
-                            <span class="text-gray-600">Started:</span>
-                            <span class="font-medium">${new Date(currentTimer.startTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-                        </div>
-                        <div class="flex justify-between">
-                            <span class="text-gray-600">Duration:</span>
-                            <span class="font-medium">${formatDuration(totalSeconds)}</span>
-                        </div>
-                        <div class="pt-3">
-                            <span class="badge ${currentTimer.isPaused ? 'badge-warning' : 'badge-success'}">
-                                ${currentTimer.isPaused ? '⏸️ Paused' : '▶️ Active'}
-                            </span>
-                        </div>
-                    </div>
-                `;
-            } else {
-                container.innerHTML = `
-                    <div class="text-center py-6 text-gray-400">
-                        <i class="fas fa-clock text-4xl mb-3"></i>
-                        <p>No active session</p>
-                        <p class="text-sm mt-1">Start a timer to begin tracking</p>
-                    </div>
-                `;
+            if (statsData.success) {
+                const stats = statsData.stats;
+                
+                document.getElementById('todayHours').textContent = stats.todayHours;
+                document.getElementById('todaySessions').textContent = stats.todaySessions;
+                document.getElementById('weeklyTotal').textContent = stats.weeklyTotal;
+                document.getElementById('daysThisWeek').textContent = stats.daysThisWeek;
+                document.getElementById('currentStatus').textContent = stats.currentStatus;
+                document.getElementById('statusDetail').textContent = stats.statusDetail;
+                document.getElementById('productivityScore').textContent = `${stats.productivityScore}%`;
+                
+                document.getElementById('todayHoursSummary').textContent = stats.todayHours;
+                document.getElementById('todaySessionsSummary').textContent = stats.todaySessions;
+                
+                // Calculate average session time
+                const avgSessionSeconds = stats.todaySessions > 0 ? 
+                    (parseFloat(stats.todayHours) * 3600 / stats.todaySessions) : 0;
+                document.getElementById('avgSessionTime').textContent = formatDurationShort(avgSessionSeconds);
             }
-        }
-
-        // ==================== DASHBOARD STATS & CHARTS ====================
-        function updateDashboardStats() {
-            if (!currentUser) return;
             
-            const today = new Date().toISOString().split('T')[0];
-            
-            const todayRecords = timeRecords.filter(r => 
-                r.userId === currentUser.id && 
-                r.date === today && 
-                !r.isRunning
-            );
-            
-            const todaySeconds = todayRecords.reduce((sum, r) => sum + (r.durationSeconds || 0), 0);
-            const todayHours = (todaySeconds / 3600).toFixed(1);
-            
-            const startOfWeek = new Date();
-            startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay() + 1);
-            const weekRecords = timeRecords.filter(r => 
-                r.userId === currentUser.id && 
-                new Date(r.date) >= startOfWeek && 
-                !r.isRunning
-            );
-            
-            const weekSeconds = weekRecords.reduce((sum, r) => sum + (r.durationSeconds || 0), 0);
-            const weekHours = (weekSeconds / 3600).toFixed(1);
-            
-            document.getElementById('todayHours').textContent = todayHours;
-            document.getElementById('todaySessions').textContent = todayRecords.length;
-            document.getElementById('weeklyTotal').textContent = weekHours;
-            document.getElementById('daysThisWeek').textContent = new Set(weekRecords.map(r => r.date)).size;
-            
-            document.getElementById('todayHoursSummary').textContent = todayHours;
-            document.getElementById('todaySessionsSummary').textContent = todayRecords.length;
-            
-            const avgSessionSeconds = todayRecords.length > 0 ? todaySeconds / todayRecords.length : 0;
-            document.getElementById('avgSessionTime').textContent = formatDurationShort(avgSessionSeconds);
-            
-            const targetHours = 8 * 5;
-            const productivityScore = Math.min((weekSeconds / 3600 / targetHours) * 100, 100);
-            document.getElementById('productivityScore').textContent = `${Math.round(productivityScore)}%`;
-            
-            const allRecords = timeRecords.filter(r => r.userId === currentUser.id && !r.isRunning);
-            const totalHours = allRecords.reduce((sum, r) => sum + (r.durationSeconds || 0), 0) / 3600;
-            const avgDaily = allRecords.length > 0 ? totalHours / (new Set(allRecords.map(r => r.date)).size || 1) : 0;
-            
-            document.getElementById('profileTotalHours').textContent = Math.round(totalHours);
-            document.getElementById('profileSessions').textContent = allRecords.length;
-            document.getElementById('profileAvgDaily').textContent = avgDaily.toFixed(1);
-            document.getElementById('profileProductivity').textContent = `${Math.round(productivityScore)}%`;
+            // Update profile stats
+            await updateProfileStats();
             
             if (weeklyChart) updateWeeklyChart();
             if (projectChart) updateProjectChart();
+        } catch (error) {
+            console.error('Error updating dashboard stats:', error);
         }
+    }
 
-        function loadDashboardActivity() {
-            const container = document.getElementById('dashboardActivity');
-            const today = new Date().toISOString().split('T')[0];
+    async function updateProfileStats() {
+        try {
+            const profileData = await api.getEmployeeProfile();
             
-            const todaysRecords = timeRecords
-                .filter(r => r.userId === currentUser.id && r.date === today && !r.isRunning)
-                .sort((a, b) => new Date(b.startTime) - new Date(a.startTime))
-                .slice(0, 5);
+            if (profileData.success) {
+                const stats = profileData.stats;
+                
+                document.getElementById('profileTotalHours').textContent = stats.totalHours;
+                document.getElementById('profileSessions').textContent = stats.sessions;
+                document.getElementById('profileAvgDaily').textContent = stats.avgDaily;
+                document.getElementById('profileProductivity').textContent = `${stats.productivityScore}%`;
+            }
+        } catch (error) {
+            console.error('Error updating profile stats:', error);
+        }
+    }
+
+    async function loadDashboardActivity() {
+        const container = document.getElementById('dashboardActivity');
+        
+        try {
+            const recordsData = await api.getEmployeeRecords({ dateRange: 'today' });
             
             container.innerHTML = '';
             
-            if (todaysRecords.length === 0) {
+            if (!recordsData.records || recordsData.records.length === 0) {
                 container.innerHTML = `
                     <div class="text-center py-8 text-gray-400">
                         <i class="fas fa-clock text-4xl mb-3"></i>
@@ -1598,6 +1578,8 @@
                 `;
                 return;
             }
+            
+            const todaysRecords = recordsData.records.slice(0, 5);
             
             todaysRecords.forEach(record => {
                 const activity = document.createElement('div');
@@ -1626,138 +1608,146 @@
                 `;
                 container.appendChild(activity);
             });
+        } catch (error) {
+            console.error('Error loading dashboard activity:', error);
+            container.innerHTML = `
+                <div class="text-center py-8 text-gray-400">
+                    <i class="fas fa-exclamation-triangle text-4xl mb-3"></i>
+                    <p>Failed to load activity</p>
+                </div>
+            `;
         }
+    }
 
-        function initializeCharts() {
-            // Weekly Chart
-            const weeklyCtx = document.getElementById('weeklyChart').getContext('2d');
-            weeklyChart = new Chart(weeklyCtx, {
-                type: 'bar',
-                data: {
-                    labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
-                    datasets: [{
-                        label: 'Hours',
-                        data: [0, 0, 0, 0, 0, 0, 0],
-                        backgroundColor: 'rgba(37, 99, 235, 0.2)',
-                        borderColor: 'rgba(37, 99, 235, 1)',
-                        borderWidth: 2,
-                        borderRadius: 8,
-                        borderSkipped: false,
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            grid: {
-                                drawBorder: false,
-                            },
-                            ticks: {
-                                callback: function(value) {
-                                    return value + 'h';
-                                }
-                            }
+    function initializeCharts() {
+        // Weekly Chart
+        const weeklyCtx = document.getElementById('weeklyChart').getContext('2d');
+        weeklyChart = new Chart(weeklyCtx, {
+            type: 'bar',
+            data: {
+                labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+                datasets: [{
+                    label: 'Hours',
+                    data: [0, 0, 0, 0, 0, 0, 0],
+                    backgroundColor: 'rgba(37, 99, 235, 0.2)',
+                    borderColor: 'rgba(37, 99, 235, 1)',
+                    borderWidth: 2,
+                    borderRadius: 8,
+                    borderSkipped: false,
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        grid: {
+                            drawBorder: false,
                         },
-                        x: {
-                            grid: {
-                                display: false
+                        ticks: {
+                            callback: function(value) {
+                                return value + 'h';
                             }
                         }
                     },
-                    plugins: {
-                        legend: {
+                    x: {
+                        grid: {
                             display: false
-                        },
-                        tooltip: {
-                            callbacks: {
-                                label: function(context) {
-                                    return context.parsed.y + ' hours';
-                                }
-                            }
                         }
                     }
-                }
-            });
-            
-            // Project Chart
-            const projectCtx = document.getElementById('projectChart').getContext('2d');
-            projectChart = new Chart(projectCtx, {
-                type: 'doughnut',
-                data: {
-                    labels: [],
-                    datasets: [{
-                        data: [],
-                        backgroundColor: [
-                            'rgba(37, 99, 235, 0.8)',
-                            'rgba(16, 185, 129, 0.8)',
-                            'rgba(139, 92, 246, 0.8)',
-                            'rgba(245, 158, 11, 0.8)',
-                            'rgba(239, 68, 68, 0.8)'
-                        ],
-                        borderWidth: 0,
-                        borderRadius: 8
-                    }]
                 },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    cutout: '70%',
-                    plugins: {
-                        legend: {
-                            position: 'bottom',
-                            labels: {
-                                padding: 20,
-                                usePointStyle: true,
-                                pointStyle: 'circle'
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return context.parsed.y + ' hours';
                             }
                         }
                     }
                 }
-            });
-            
-            updateWeeklyChart();
-            updateProjectChart();
-        }
+            }
+        });
+        
+        // Project Chart
+        const projectCtx = document.getElementById('projectChart').getContext('2d');
+        projectChart = new Chart(projectCtx, {
+            type: 'doughnut',
+            data: {
+                labels: [],
+                datasets: [{
+                    data: [],
+                    backgroundColor: [
+                        'rgba(37, 99, 235, 0.8)',
+                        'rgba(16, 185, 129, 0.8)',
+                        'rgba(139, 92, 246, 0.8)',
+                        'rgba(245, 158, 11, 0.8)',
+                        'rgba(239, 68, 68, 0.8)'
+                    ],
+                    borderWidth: 0,
+                    borderRadius: 8
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                cutout: '70%',
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: {
+                            padding: 20,
+                            usePointStyle: true,
+                            pointStyle: 'circle'
+                        }
+                    }
+                }
+            }
+        });
+        
+        updateWeeklyChart();
+        updateProjectChart();
+    }
 
-        function updateWeeklyChart() {
-            if (!weeklyChart) return;
+    async function updateWeeklyChart() {
+        if (!weeklyChart) return;
+        
+        try {
+            const recordsData = await api.getEmployeeRecords({ dateRange: 'week' });
             
-            const today = new Date();
-            const startOfWeek = new Date(today);
-            startOfWeek.setDate(today.getDate() - today.getDay() + 1);
+            if (!recordsData.records) return;
             
-            const weekData = [0, 0, 0, 0, 0, 0, 0];
+            const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+            const data = [0, 0, 0, 0, 0, 0, 0];
             
-            timeRecords.filter(r => {
-                const recordDate = new Date(r.date);
-                return r.userId === currentUser.id && recordDate >= startOfWeek && !r.isRunning;
-            }).forEach(r => {
-                const recordDate = new Date(r.date);
+            // Get day of week for each record
+            recordsData.records.forEach(record => {
+                const recordDate = new Date(record.date);
                 const dayOfWeek = recordDate.getDay();
                 const index = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-                weekData[index] += (r.durationSeconds || 0) / 3600;
+                data[index] += (record.durationSeconds || 0) / 3600;
             });
             
-            weeklyChart.data.datasets[0].data = weekData;
+            weeklyChart.data.datasets[0].data = data;
             weeklyChart.update();
+        } catch (error) {
+            console.error('Error updating weekly chart:', error);
         }
+    }
 
-        function updateProjectChart() {
-            if (!projectChart) return;
+    async function updateProjectChart() {
+        if (!projectChart) return;
+        
+        try {
+            const recordsData = await api.getEmployeeRecords({ dateRange: 'week' });
             
-            const startOfWeek = new Date();
-            startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay() + 1);
+            if (!recordsData.records) return;
             
             const projectHours = {};
-            const weekRecords = timeRecords.filter(r => 
-                r.userId === currentUser.id && 
-                new Date(r.date) >= startOfWeek && 
-                !r.isRunning
-            );
-            
-            weekRecords.forEach(r => {
+            recordsData.records.forEach(r => {
                 if (!projectHours[r.project]) {
                     projectHours[r.project] = 0;
                 }
@@ -1767,337 +1757,317 @@
             projectChart.data.labels = Object.keys(projectHours);
             projectChart.data.datasets[0].data = Object.values(projectHours);
             projectChart.update();
+        } catch (error) {
+            console.error('Error updating project chart:', error);
         }
+    }
 
-        // ==================== HISTORY FUNCTIONS ====================
-        function loadProjectFilter() {
+    // ==================== HISTORY FUNCTIONS ====================
+    async function loadProjectFilter() {
+        try {
+            const recordsData = await api.getEmployeeRecords();
             const filter = document.getElementById('projectFilter');
-            const userRecords = timeRecords.filter(r => r.userId === currentUser.id && !r.isRunning);
-            const projects = [...new Set(userRecords.map(r => r.project))].sort();
             
             filter.innerHTML = '<option value="all">All Projects</option>';
-            projects.forEach(project => {
-                const option = document.createElement('option');
-                option.value = project;
-                option.textContent = project;
-                filter.appendChild(option);
+            
+            if (recordsData.projects) {
+                recordsData.projects.forEach(project => {
+                    const option = document.createElement('option');
+                    option.value = project;
+                    option.textContent = project;
+                    filter.appendChild(option);
+                });
+            }
+        } catch (error) {
+            console.error('Error loading project filter:', error);
+        }
+    }
+
+    async function filterHistory() {
+        const dateRange = document.getElementById('dateRangeFilter').value;
+        const project = document.getElementById('projectFilter').value;
+        const sortBy = document.getElementById('sortFilter').value;
+        
+        try {
+            const recordsData = await api.getEmployeeRecords({
+                dateRange,
+                project,
+                sortBy
             });
+            
+            displayHistory(recordsData.records || []);
+        } catch (error) {
+            showToast('Failed to filter records: ' + error.message, 'error');
         }
+    }
 
-        function filterHistory() {
-            const dateRange = document.getElementById('dateRangeFilter').value;
-            const project = document.getElementById('projectFilter').value;
-            const sortBy = document.getElementById('sortFilter').value;
-            
-            let userRecords = timeRecords.filter(r => r.userId === currentUser.id && !r.isRunning);
-            
-            const today = new Date().toISOString().split('T')[0];
-            const startOfWeek = new Date();
-            startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay() + 1);
-            const startOfMonth = new Date();
-            startOfMonth.setDate(1);
-            
-            if (dateRange === 'today') {
-                userRecords = userRecords.filter(r => r.date === today);
-            } else if (dateRange === 'week') {
-                userRecords = userRecords.filter(r => new Date(r.date) >= startOfWeek);
-            } else if (dateRange === 'month') {
-                userRecords = userRecords.filter(r => new Date(r.date) >= startOfMonth);
-            }
-            
-            if (project !== 'all') {
-                userRecords = userRecords.filter(r => r.project === project);
-            }
-            
-            if (sortBy === 'newest') {
-                userRecords.sort((a, b) => new Date(b.startTime) - new Date(a.startTime));
-            } else if (sortBy === 'oldest') {
-                userRecords.sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
-            } else if (sortBy === 'duration') {
-                userRecords.sort((a, b) => (b.durationSeconds || 0) - (a.durationSeconds || 0));
-            }
-            
-            displayHistory(userRecords);
+    function displayHistory(records) {
+        const table = document.getElementById('historyTable');
+        const emptyState = document.getElementById('historyEmpty');
+        
+        table.innerHTML = '';
+        
+        if (!records || records.length === 0) {
+            emptyState.classList.remove('hidden');
+            document.getElementById('recordsCount').textContent = '0 records';
+            return;
         }
+        
+        emptyState.classList.add('hidden');
+        document.getElementById('recordsCount').textContent = `${records.length} records`;
+        
+        timeRecords = records;
+        
+        records.forEach(record => {
+            const row = document.createElement('tr');
+            row.className = 'table-row';
+            row.innerHTML = `
+                <td class="py-4 px-6">${record.date}</td>
+                <td class="py-4 px-6">
+                    <span class="badge badge-primary">${record.project}</span>
+                </td>
+                <td class="py-4 px-6">${record.task}</td>
+                <td class="py-4 px-6">${new Date(record.startTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</td>
+                <td class="py-4 px-6">${new Date(record.endTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</td>
+                <td class="py-4 px-6 font-medium">${record.duration}</td>
+                <td class="py-4 px-6">
+                    <button onclick="deleteRecord('${record.id}')" class="text-red-500 hover:text-red-700 p-2 rounded-lg hover:bg-red-50">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </td>
+            `;
+            table.appendChild(row);
+        });
+    }
 
-        function displayHistory(records) {
-            const table = document.getElementById('historyTable');
-            const emptyState = document.getElementById('historyEmpty');
-            
-            table.innerHTML = '';
-            
-            if (records.length === 0) {
-                emptyState.classList.remove('hidden');
-                document.getElementById('recordsCount').textContent = '0 records';
-                return;
-            }
-            
-            emptyState.classList.add('hidden');
-            document.getElementById('recordsCount').textContent = `${records.length} records`;
-            
-            records.forEach(record => {
-                const row = document.createElement('tr');
-                row.className = 'table-row';
-                row.innerHTML = `
-                    <td class="py-4 px-6">${record.date}</td>
-                    <td class="py-4 px-6">
-                        <span class="badge badge-primary">${record.project}</span>
-                    </td>
-                    <td class="py-4 px-6">${record.task}</td>
-                    <td class="py-4 px-6">${new Date(record.startTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</td>
-                    <td class="py-4 px-6">${new Date(record.endTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</td>
-                    <td class="py-4 px-6 font-medium">${record.duration}</td>
-                    <td class="py-4 px-6">
-                        <button onclick="deleteRecord('${record.id}')" class="text-red-500 hover:text-red-700 p-2 rounded-lg hover:bg-red-50">
-                            <i class="fas fa-trash"></i>
-                        </button>
-                    </td>
-                `;
-                table.appendChild(row);
-            });
+    async function resetHistoryFilters() {
+        document.getElementById('dateRangeFilter').value = 'today';
+        document.getElementById('projectFilter').value = 'all';
+        document.getElementById('sortFilter').value = 'newest';
+        await filterHistory();
+    }
+
+    async function deleteRecord(recordId) {
+        if (!confirm('Are you sure you want to delete this record?')) {
+            return;
         }
-
-        function resetHistoryFilters() {
-            document.getElementById('dateRangeFilter').value = 'today';
-            document.getElementById('projectFilter').value = 'all';
-            document.getElementById('sortFilter').value = 'newest';
-            filterHistory();
-        }
-
-        function deleteRecord(recordId) {
-            if (!confirm('Are you sure you want to delete this record?')) {
-                return;
-            }
-            
-            timeRecords = timeRecords.filter(r => r.id !== recordId);
-            localStorage.setItem('ce_time_records', JSON.stringify(timeRecords));
+        
+        try {
+            await api.deleteRecord(recordId);
             
             showToast('Record deleted', 'info');
             
-            updateDashboardStats();
-            loadDashboardActivity();
-            filterHistory();
-            loadProjectFilter();
+            await updateDashboardStats();
+            await loadDashboardActivity();
+            await filterHistory();
+            await loadProjectFilter();
+        } catch (error) {
+            showToast('Failed to delete record: ' + error.message, 'error');
         }
+    }
 
-        // ==================== MANUAL ENTRY ====================
-        function showAddEntryModal() {
-            const now = new Date();
-            const oneHourAgo = new Date(now.getTime() - 3600000);
-            
-            document.getElementById('manualStartTime').value = formatDateTimeLocal(oneHourAgo);
-            document.getElementById('manualEndTime').value = formatDateTimeLocal(now);
-            
-            showModal('addEntryModal');
+    // ==================== MANUAL ENTRY ====================
+    function showAddEntryModal() {
+        const now = new Date();
+        const oneHourAgo = new Date(now.getTime() - 3600000);
+        
+        document.getElementById('manualStartTime').value = formatDateTimeLocal(oneHourAgo);
+        document.getElementById('manualEndTime').value = formatDateTimeLocal(now);
+        
+        showModal('addEntryModal');
+    }
+
+    async function saveManualEntry() {
+        const project = document.getElementById('manualProject').value;
+        const task = document.getElementById('manualTask').value.trim();
+        const startTime = document.getElementById('manualStartTime').value;
+        const endTime = document.getElementById('manualEndTime').value;
+        
+        if (!task) {
+            showToast('Please enter task description', 'error');
+            return;
         }
-
-        function saveManualEntry() {
-            const project = document.getElementById('manualProject').value;
-            const task = document.getElementById('manualTask').value.trim();
-            const startTime = document.getElementById('manualStartTime').value;
-            const endTime = document.getElementById('manualEndTime').value;
-            
-            if (!task) {
-                showToast('Please enter task description', 'error');
-                return;
-            }
-            
-            if (!startTime || !endTime) {
-                showToast('Please select start and end times', 'error');
-                return;
-            }
-            
-            const startDate = new Date(startTime);
-            const endDate = new Date(endTime);
-            
-            if (endDate <= startDate) {
-                showToast('End time must be after start time', 'error');
-                return;
-            }
-            
-            const durationSeconds = Math.floor((endDate - startDate) / 1000);
-            
-            const timeRecord = {
-                id: 'manual_' + Date.now(),
-                userId: currentUser.id,
-                userName: `${currentUser.firstName} ${currentUser.lastName}`,
-                userEmail: currentUser.email,
-                project: project,
-                task: task,
+        
+        if (!startTime || !endTime) {
+            showToast('Please select start and end times', 'error');
+            return;
+        }
+        
+        const startDate = new Date(startTime);
+        const endDate = new Date(endTime);
+        
+        if (endDate <= startDate) {
+            showToast('End time must be after start time', 'error');
+            return;
+        }
+        
+        try {
+            await api.addManualEntry({
+                project,
+                task,
                 startTime: startDate.toISOString(),
-                endTime: endDate.toISOString(),
-                duration: formatDuration(durationSeconds),
-                durationSeconds: durationSeconds,
-                isRunning: false,
-                date: startDate.toISOString().split('T')[0],
-                recordedAt: new Date().toISOString(),
-                isManual: true
-            };
-            
-            timeRecords.push(timeRecord);
-            localStorage.setItem('ce_time_records', JSON.stringify(timeRecords));
+                endTime: endDate.toISOString()
+            });
             
             closeModal('addEntryModal');
             showToast('Manual entry added successfully', 'success');
             
-            updateDashboardStats();
-            loadDashboardActivity();
-            filterHistory();
-            loadProjectFilter();
+            await updateDashboardStats();
+            await loadDashboardActivity();
+            await filterHistory();
+            await loadProjectFilter();
+        } catch (error) {
+            showToast('Failed to add manual entry: ' + error.message, 'error');
         }
+    }
 
-        function addQuickEntry(type) {
-            const now = new Date();
-            let project, task, duration;
-            
-            switch(type) {
-                case 'Meeting':
-                    project = 'Meeting';
-                    task = 'Team meeting';
-                    duration = 3600;
-                    break;
-                default:
-                    project = 'General';
-                    task = 'Quick entry';
-                    duration = 1800;
-            }
-            
-            const startTime = new Date(now.getTime() - duration * 1000);
-            
-            const timeRecord = {
-                id: 'quick_' + Date.now(),
-                userId: currentUser.id,
-                userName: `${currentUser.firstName} ${currentUser.lastName}`,
-                userEmail: currentUser.email,
-                project: project,
-                task: task,
+    async function addQuickEntry(type) {
+        const now = new Date();
+        let project, task, duration;
+        
+        switch(type) {
+            case 'Meeting':
+                project = 'Meeting';
+                task = 'Team meeting';
+                duration = 3600;
+                break;
+            default:
+                project = 'General';
+                task = 'Quick entry';
+                duration = 1800;
+        }
+        
+        const startTime = new Date(now.getTime() - duration * 1000);
+        
+        try {
+            await api.addManualEntry({
+                project,
+                task,
                 startTime: startTime.toISOString(),
-                endTime: now.toISOString(),
-                duration: formatDuration(duration),
-                durationSeconds: duration,
-                isRunning: false,
-                date: now.toISOString().split('T')[0],
-                recordedAt: now.toISOString(),
-                isQuick: true
-            };
-            
-            timeRecords.push(timeRecord);
-            localStorage.setItem('ce_time_records', JSON.stringify(timeRecords));
+                endTime: now.toISOString()
+            });
             
             showToast(`${type} entry added`, 'success');
             
+            await updateDashboardStats();
+            await loadDashboardActivity();
+            await filterHistory();
+            await loadProjectFilter();
+        } catch (error) {
+            showToast('Failed to add quick entry: ' + error.message, 'error');
+        }
+    }
+
+    // ==================== UTILITY FUNCTIONS ====================
+    function formatDuration(totalSeconds) {
+        const hours = Math.floor(totalSeconds / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        const seconds = totalSeconds % 60;
+        
+        if (hours > 0) {
+            return `${hours}h ${minutes}m`;
+        } else if (minutes > 0) {
+            return `${minutes}m ${seconds}s`;
+        } else {
+            return `${seconds}s`;
+        }
+    }
+
+    function formatDurationShort(totalSeconds) {
+        const hours = Math.floor(totalSeconds / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        
+        if (hours > 0) {
+            return `${hours}h ${minutes}m`;
+        } else {
+            return `${minutes}m`;
+        }
+    }
+
+    function formatDateTimeLocal(date) {
+        return date.toISOString().slice(0, 16);
+    }
+
+    function switchTab(tabName) {
+        document.querySelectorAll('.tab-content').forEach(tab => {
+            tab.classList.add('hidden');
+        });
+        
+        document.querySelectorAll('.sidebar-item').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        
+        document.getElementById(tabName).classList.remove('hidden');
+        
+        const tabBtn = document.querySelector(`[data-tab="${tabName}"]`);
+        if (tabBtn) {
+            tabBtn.classList.add('active');
+        }
+        
+        if (tabName === 'dashboard') {
             updateDashboardStats();
             loadDashboardActivity();
+        } else if (tabName === 'history') {
             filterHistory();
-            loadProjectFilter();
+        } else if (tabName === 'profile') {
+            updateProfileStats();
         }
+    }
 
-        // ==================== UTILITY FUNCTIONS ====================
-        function formatDuration(totalSeconds) {
-            const hours = Math.floor(totalSeconds / 3600);
-            const minutes = Math.floor((totalSeconds % 3600) / 60);
-            const seconds = totalSeconds % 60;
-            
-            if (hours > 0) {
-                return `${hours}h ${minutes}m`;
-            } else if (minutes > 0) {
-                return `${minutes}m ${seconds}s`;
-            } else {
-                return `${seconds}s`;
-            }
+    function showToast(message, type = 'info') {
+        const toast = document.getElementById('toast');
+        
+        let icon = 'fa-info-circle';
+        let bgColor = 'bg-blue-600';
+        
+        if (type === 'success') {
+            icon = 'fa-check-circle';
+            bgColor = 'bg-green-600';
+        } else if (type === 'error') {
+            icon = 'fa-exclamation-circle';
+            bgColor = 'bg-red-600';
+        } else if (type === 'warning') {
+            icon = 'fa-exclamation-triangle';
+            bgColor = 'bg-yellow-600';
         }
+        
+        toast.className = `toast ${bgColor}`;
+        toast.innerHTML = `
+            <div class="flex items-center space-x-3">
+                <i class="fas ${icon}"></i>
+                <span>${message}</span>
+            </div>
+        `;
+        
+        toast.classList.remove('hidden');
+        
+        setTimeout(() => {
+            toast.classList.add('hidden');
+        }, 3000);
+    }
 
-        function formatDurationShort(totalSeconds) {
-            const hours = Math.floor(totalSeconds / 3600);
-            const minutes = Math.floor((totalSeconds % 3600) / 60);
-            
-            if (hours > 0) {
-                return `${hours}h ${minutes}m`;
-            } else {
-                return `${minutes}m`;
-            }
-        }
+    function showModal(modalId) {
+        document.getElementById(modalId).style.display = 'block';
+    }
 
-        function formatDateTimeLocal(date) {
-            return date.toISOString().slice(0, 16);
-        }
+    function closeModal(modalId) {
+        document.getElementById(modalId).style.display = 'none';
+    }
 
-        function switchTab(tabName) {
-            document.querySelectorAll('.tab-content').forEach(tab => {
-                tab.classList.add('hidden');
-            });
+    async function exportMyData() {
+        if (!currentUser) return;
+        
+        try {
+            const recordsData = await api.getEmployeeRecords({ dateRange: 'all' });
             
-            document.querySelectorAll('.sidebar-item').forEach(btn => {
-                btn.classList.remove('active');
-            });
-            
-            document.getElementById(tabName).classList.remove('hidden');
-            
-            const tabBtn = document.querySelector(`[data-tab="${tabName}"]`);
-            if (tabBtn) {
-                tabBtn.classList.add('active');
-            }
-            
-            if (tabName === 'dashboard') {
-                updateDashboardStats();
-                loadDashboardActivity();
-            } else if (tabName === 'history') {
-                filterHistory();
-            }
-        }
-        function showToast(message, type = 'info') {
-            const toast = document.getElementById('toast');
-            
-            let icon = 'fa-info-circle';
-            let bgColor = 'bg-blue-600';
-            
-            if (type === 'success') {
-                icon = 'fa-check-circle';
-                bgColor = 'bg-green-600';
-            } else if (type === 'error') {
-                icon = 'fa-exclamation-circle';
-                bgColor = 'bg-red-600';
-            } else if (type === 'warning') {
-                icon = 'fa-exclamation-triangle';
-                bgColor = 'bg-yellow-600';
-            }
-            
-            toast.className = `toast ${bgColor}`;
-            toast.innerHTML = `
-                <div class="flex items-center space-x-3">
-                    <i class="fas ${icon}"></i>
-                    <span>${message}</span>
-                </div>
-            `;
-            
-            toast.classList.remove('hidden');
-            
-            setTimeout(() => {
-                toast.classList.add('hidden');
-            }, 3000);
-        }
-
-        function showModal(modalId) {
-            document.getElementById(modalId).style.display = 'block';
-        }
-
-        function closeModal(modalId) {
-            document.getElementById(modalId).style.display = 'none';
-        }
-
-        function exportMyData() {
-            if (!currentUser) return;
-            
-            const userRecords = timeRecords.filter(r => r.userId === currentUser.id && !r.isRunning);
-            
-            if (userRecords.length === 0) {
+            if (!recordsData.records || recordsData.records.length === 0) {
                 showToast('No data to export', 'info');
                 return;
             }
             
             let csv = 'Date,Project,Task,Start Time,End Time,Duration (hours),Duration\n';
             
-            userRecords.forEach(record => {
+            recordsData.records.forEach(record => {
                 const hours = (record.durationSeconds || 0) / 3600;
                 csv += `"${record.date}","${record.project}","${record.task}","${record.startTime}","${record.endTime}",${hours.toFixed(2)},"${record.duration}"\n`;
             });
@@ -2112,99 +2082,54 @@
             document.body.removeChild(a);
             
             showToast('Data exported to CSV', 'success');
+        } catch (error) {
+            showToast('Failed to export data: ' + error.message, 'error');
         }
-
-        function startQuickTimer() {
-            document.getElementById('taskInput').value = 'Quick task - ' + new Date().toLocaleTimeString();
-            switchTab('timer');
-        }
-
-        // Auto-save timer every 30 seconds
-        setInterval(() => {
-            if (currentTimer) {
-                localStorage.setItem('current_employee_timer', JSON.stringify(currentTimer));
-            }
-        }, 30000);
-
-        // Initialize date/time fields in modal
-        document.addEventListener('DOMContentLoaded', function() {
-            const now = new Date();
-            const oneHourAgo = new Date(now.getTime() - 3600000);
-            
-            if (document.getElementById('manualStartTime')) {
-                document.getElementById('manualStartTime').value = formatDateTimeLocal(oneHourAgo);
-                document.getElementById('manualEndTime').value = formatDateTimeLocal(now);
-            }
-        });
-
-        // Close modal when clicking outside
-        window.addEventListener('click', function(event) {
-            const modals = document.querySelectorAll('.modal');
-            modals.forEach(modal => {
-                if (event.target === modal) {
-                    modal.style.display = 'none';
-                }
-            });
-        });
-
-        console.log('Employee Portal loaded successfully');
-
-
-
-
-
-
-// Add this to your JavaScript section in both files
-
-// Mobile menu toggle
-function toggleMobileMenu() {
-    const sidebar = document.querySelector('.sidebar');
-    sidebar.classList.toggle('active');
-}
-
-// Close mobile menu when clicking outside
-document.addEventListener('click', function(e) {
-    const sidebar = document.querySelector('.sidebar');
-    const mobileToggle = document.querySelector('.mobile-menu-toggle');
-    
-    if (sidebar && sidebar.classList.contains('active') && 
-        !sidebar.contains(e.target) && 
-        !mobileToggle.contains(e.target)) {
-        sidebar.classList.remove('active');
     }
-});
 
-// Auto-close sidebar on menu item click (for mobile)
-document.querySelectorAll('.sidebar-item').forEach(item => {
-    item.addEventListener('click', function() {
-        if (window.innerWidth <= 768) {
-            const sidebar = document.querySelector('.sidebar');
+    function startQuickTimer() {
+        document.getElementById('taskInput').value = 'Quick task - ' + new Date().toLocaleTimeString();
+        switchTab('timer');
+    }
+
+    // Mobile menu functions
+    function toggleMobileMenu() {
+        const sidebar = document.querySelector('.sidebar');
+        sidebar.classList.toggle('active');
+    }
+
+    document.addEventListener('click', function(e) {
+        const sidebar = document.querySelector('.sidebar');
+        const mobileToggle = document.querySelector('.mobile-menu-toggle');
+        
+        if (sidebar && sidebar.classList.contains('active') && 
+            !sidebar.contains(e.target) && 
+            !mobileToggle.contains(e.target)) {
             sidebar.classList.remove('active');
         }
     });
-});
 
-// Update viewport for mobile devices
-function updateViewport() {
-    const viewport = document.querySelector('meta[name="viewport"]');
-    if (window.innerWidth <= 768) {
-        viewport.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no');
-    } else {
-        viewport.setAttribute('content', 'width=device-width, initial-scale=1.0');
-    }
-}
+    document.querySelectorAll('.sidebar-item').forEach(item => {
+        item.addEventListener('click', function() {
+            if (window.innerWidth <= 768) {
+                const sidebar = document.querySelector('.sidebar');
+                sidebar.classList.remove('active');
+            }
+        });
+    });
 
-// Call on load and resize
-updateViewport();
-window.addEventListener('resize', updateViewport);
+    // Close modal when clicking outside
+    window.addEventListener('click', function(event) {
+        const modals = document.querySelectorAll('.modal');
+        modals.forEach(modal => {
+            if (event.target === modal) {
+                modal.style.display = 'none';
+            }
+        });
+    });
 
-// Add mobile menu button HTML (add this inside <body>):
-/*
-<button class="mobile-menu-toggle hidden" onclick="toggleMobileMenu()">
-    <i class="fas fa-bars"></i>
-</button>
-*/
-
-    </script>
+    console.log('Employee Portal loaded successfully with API integration');
+</script>
 </body>
+
 </html>
