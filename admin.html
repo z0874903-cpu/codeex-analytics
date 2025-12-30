@@ -996,1188 +996,672 @@
         <div id="toast" class="toast hidden"></div>
     </div>
 
-    <script>
-        // ==================== GLOBAL VARIABLES ====================
-        let employees = JSON.parse(localStorage.getItem('ce_users')) || [];
-        let timeRecords = JSON.parse(localStorage.getItem('ce_time_records')) || [];
-        let currentAdmin = null;
-        let dailyTrendChart = null;
-        let departmentChart = null;
-        let productivityChart = null;
-        let projectDistributionChart = null;
+   <script>
+// ==================== GLOBAL VARIABLES ====================
+const api = window.api;
+let employees = [];
+let timeRecords = [];
+let currentAdmin = null;
+let dailyTrendChart = null;
+let departmentChart = null;
+let productivityChart = null;
+let projectDistributionChart = null;
 
-        // ==================== INITIALIZATION ====================
 // ==================== INITIALIZATION ====================
 document.addEventListener('DOMContentLoaded', function() {
-    // Initialize default admin if none exists
-    let employees = JSON.parse(localStorage.getItem('ce_users')) || [];
-    let timeRecords = JSON.parse(localStorage.getItem('ce_time_records')) || [];
-    
-    // Check if admin account exists, if not create one
-    if (employees.length === 0 || !employees.some(u => u.role === 'admin')) {
-        const adminUser = {
-            id: 'admin_001',
-            firstName: 'Admin',
-            lastName: 'User',
-            email: 'admin@codeexanalytics.com',
-            password: 'admin123',
-            role: 'admin',
-            department: 'Administration',
-            position: 'System Administrator',
-            employeeId: 'ADM001',
-            createdAt: new Date().toISOString()
-        };
-        employees.push(adminUser);
-        localStorage.setItem('ce_users', JSON.stringify(employees));
-    }
-    
-    // Initialize empty time records if none
-    if (timeRecords.length === 0) {
-        localStorage.setItem('ce_time_records', JSON.stringify([]));
-    }
-    
     // Check if admin is already logged in
     const savedAdminId = sessionStorage.getItem('ce_current_admin');
-    if (savedAdminId) {
-        const adminId = JSON.parse(savedAdminId);
-        currentAdmin = employees.find(u => u.id === adminId && u.role === 'admin');
-        
-        if (currentAdmin) {
-            document.getElementById('adminLoginPage').style.display = 'none';
-            document.getElementById('adminDashboard').style.display = 'block';
-            initializeAdminDashboard();
-        }
+    if (savedAdminId && api.currentUser) {
+        currentAdmin = api.currentUser;
+        document.getElementById('adminLoginPage').style.display = 'none';
+        document.getElementById('adminDashboard').style.display = 'block';
+        initializeAdminDashboard();
     }
     
-    // Set up event listeners
     setupEventListeners();
 });
 
-        function setupEventListeners() {
-            // Admin menu toggle
-            document.getElementById('adminMenuBtn').addEventListener('click', function(e) {
-                e.stopPropagation();
-                const dropdown = document.getElementById('adminDropdown');
-                dropdown.classList.toggle('hidden');
-            });
-            
-            // Close dropdown when clicking outside
-            document.addEventListener('click', function(e) {
-                if (!document.getElementById('adminMenuBtn').contains(e.target)) {
-                    document.getElementById('adminDropdown').classList.add('hidden');
-                }
-            });
-        }
-
-        // ==================== AUTHENTICATION ====================
-        function adminLogin() {
-            const email = document.getElementById('adminEmail').value.trim().toLowerCase();
-            const password = document.getElementById('adminPassword').value;
-            
-            if (!email || !password) {
-                showToast('Please enter email and password', 'error');
-                return;
-            }
-            
-            const admin = employees.find(u => u.email.toLowerCase() === email && u.role === 'admin');
-            
-            if (!admin) {
-                showToast('Admin account not found', 'error');
-                return;
-            }
-            
-            if (admin.password !== password) {
-                showToast('Invalid password', 'error');
-                return;
-            }
-            
-            currentAdmin = admin;
-            sessionStorage.setItem('ce_current_admin', JSON.stringify(admin.id));
-            
-            document.getElementById('adminLoginPage').style.display = 'none';
-            document.getElementById('adminDashboard').style.display = 'block';
-            
-            showToast('Admin login successful!', 'success');
-            initializeAdminDashboard();
-        }
-
-        function adminLogout() {
-            currentAdmin = null;
-            sessionStorage.removeItem('ce_current_admin');
-            
-            document.getElementById('adminDashboard').style.display = 'none';
-            document.getElementById('adminLoginPage').style.display = 'flex';
-            
-            showToast('Signed out successfully', 'info');
-        }
-
-        // ==================== ADMIN DASHBOARD INITIALIZATION ====================
-        function initializeAdminDashboard() {
-            if (!currentAdmin) {
-                adminLogout();
-                return;
-            }
-            
-            updateAdminInfo();
-            updateDateTime();
-            setInterval(updateDateTime, 60000);
-            
-            loadEmployeesTable();
-            updateDashboardStats();
-            loadEmployeeFilter();
-            loadProjectFilter();
-            updateCounts();
-            initializeCharts();
-            
-            switchTab('adminDashboard');
-        }
-
-        function updateAdminInfo() {
-            if (!currentAdmin) return;
-            
-            document.getElementById('adminName').textContent = `${currentAdmin.firstName} ${currentAdmin.lastName}`;
-            document.getElementById('dropdownAdminName').textContent = `${currentAdmin.firstName} ${currentAdmin.lastName}`;
-            document.getElementById('dropdownAdminEmail').textContent = currentAdmin.email;
-        }
-
-        function updateDateTime() {
-            const now = new Date();
-            const options = { 
-                weekday: 'long', 
-                year: 'numeric', 
-                month: 'long', 
-                day: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit'
-            };
-            document.getElementById('currentDateTime').textContent = now.toLocaleDateString('en-US', options);
-        }
-
-        function updateCounts() {
-            const employeeCount = employees.filter(e => e.role === 'employee').length;
-            const recordCount = timeRecords.filter(r => !r.isRunning).length;
-            
-            document.getElementById('totalEmployeesCount').textContent = employeeCount;
-            document.getElementById('totalRecordsCount').textContent = recordCount;
-        }
-
-        // ==================== TAB NAVIGATION ====================
-        function switchTab(tabName) {
-            document.querySelectorAll('.tab-content').forEach(tab => {
-                tab.classList.add('hidden');
-            });
-            
-            document.querySelectorAll('.sidebar-item').forEach(btn => {
-                btn.classList.remove('active');
-            });
-            
-            document.getElementById(tabName).classList.remove('hidden');
-            
-            const tabBtn = document.querySelector(`[data-tab="${tabName}"]`);
-            if (tabBtn) {
-                tabBtn.classList.add('active');
-            }
-            
-            if (tabName === 'adminDashboard') {
-                updateDashboardStats();
-            } else if (tabName === 'records') {
-                loadAllRecords();
-            } else if (tabName === 'employees') {
-                loadEmployeesTable();
-                updateDepartmentOverview();
-            } else if (tabName === 'analytics') {
-                updateAnalytics();
-            }
-        }
-
-        // ==================== EMPLOYEE MANAGEMENT ====================
-       function loadEmployeesTable() {
-    const table = document.getElementById('employeesTable');
-    const employeeList = employees.filter(e => e.role === 'employee' && e.id !== 'emp_001'); // Filter out demo employee
+function setupEventListeners() {
+    document.getElementById('adminMenuBtn').addEventListener('click', function(e) {
+        e.stopPropagation();
+        const dropdown = document.getElementById('adminDropdown');
+        dropdown.classList.toggle('hidden');
+    });
     
-    table.innerHTML = '';
+    document.addEventListener('click', function(e) {
+        if (!document.getElementById('adminMenuBtn').contains(e.target)) {
+            document.getElementById('adminDropdown').classList.add('hidden');
+        }
+    });
+}
+
+// ==================== AUTHENTICATION ====================
+async function adminLogin() {
+    const email = document.getElementById('adminEmail').value.trim().toLowerCase();
+    const password = document.getElementById('adminPassword').value;
     
-    if (employeeList.length === 0) {
-        table.innerHTML = `
-            <tr>
-                <td colspan="6" class="py-12 text-center text-gray-500">
-                    <div class="flex flex-col items-center">
-                        <i class="fas fa-users text-5xl mb-4 text-gray-200"></i>
-                        <p class="text-lg font-medium text-gray-700 mb-2">No employees yet</p>
-                        <p class="text-sm text-gray-500 mb-4">Add your first employee to get started</p>
-                        <button onclick="showAddEmployeeModal()" class="btn-primary px-6 py-3 rounded-lg font-medium">
-                            <i class="fas fa-user-plus mr-2"></i> Add First Employee
+    if (!email || !password) {
+        showToast('Please enter email and password', 'error');
+        return;
+    }
+    
+    try {
+        const response = await api.adminLogin(email, password);
+        currentAdmin = response.user;
+        
+        document.getElementById('adminLoginPage').style.display = 'none';
+        document.getElementById('adminDashboard').style.display = 'block';
+        
+        showToast('Admin login successful!', 'success');
+        initializeAdminDashboard();
+    } catch (error) {
+        showToast('Login failed: ' + error.message, 'error');
+    }
+}
+
+function adminLogout() {
+    api.clearAuth();
+    currentAdmin = null;
+    
+    document.getElementById('adminDashboard').style.display = 'none';
+    document.getElementById('adminLoginPage').style.display = 'flex';
+    
+    showToast('Signed out successfully', 'info');
+}
+
+// ==================== ADMIN DASHBOARD INITIALIZATION ====================
+async function initializeAdminDashboard() {
+    if (!currentAdmin) {
+        adminLogout();
+        return;
+    }
+    
+    updateAdminInfo();
+    updateDateTime();
+    setInterval(updateDateTime, 60000);
+    
+    await loadEmployeesTable();
+    await updateDashboardStats();
+    await loadEmployeeFilter();
+    await loadProjectFilter();
+    await updateCounts();
+    initializeCharts();
+    
+    switchTab('adminDashboard');
+}
+
+function updateAdminInfo() {
+    if (!currentAdmin) return;
+    
+    document.getElementById('adminName').textContent = `${currentAdmin.firstName} ${currentAdmin.lastName}`;
+    document.getElementById('dropdownAdminName').textContent = `${currentAdmin.firstName} ${currentAdmin.lastName}`;
+    document.getElementById('dropdownAdminEmail').textContent = currentAdmin.email;
+}
+
+function updateDateTime() {
+    const now = new Date();
+    const options = { 
+        weekday: 'long', 
+        year: 'numeric', 
+        month: 'long', 
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+    };
+    document.getElementById('currentDateTime').textContent = now.toLocaleDateString('en-US', options);
+}
+
+async function updateCounts() {
+    try {
+        const employeesData = await api.getEmployees();
+        const recordsData = await api.getAdminRecords();
+        
+        document.getElementById('totalEmployeesCount').textContent = employeesData.length;
+        document.getElementById('totalRecordsCount').textContent = recordsData.total || 0;
+    } catch (error) {
+        console.error('Error updating counts:', error);
+    }
+}
+
+// ==================== TAB NAVIGATION ====================
+function switchTab(tabName) {
+    document.querySelectorAll('.tab-content').forEach(tab => {
+        tab.classList.add('hidden');
+    });
+    
+    document.querySelectorAll('.sidebar-item').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    
+    document.getElementById(tabName).classList.remove('hidden');
+    
+    const tabBtn = document.querySelector(`[data-tab="${tabName}"]`);
+    if (tabBtn) {
+        tabBtn.classList.add('active');
+    }
+    
+    if (tabName === 'adminDashboard') {
+        updateDashboardStats();
+    } else if (tabName === 'records') {
+        loadAllRecords();
+    } else if (tabName === 'employees') {
+        loadEmployeesTable();
+        updateDepartmentOverview();
+    } else if (tabName === 'analytics') {
+        updateAnalytics();
+    }
+}
+
+// ==================== EMPLOYEE MANAGEMENT ====================
+async function loadEmployeesTable() {
+    try {
+        const employeesData = await api.getEmployees();
+        const table = document.getElementById('employeesTable');
+        
+        table.innerHTML = '';
+        
+        if (employeesData.length === 0) {
+            table.innerHTML = `
+                <tr>
+                    <td colspan="6" class="py-12 text-center text-gray-500">
+                        <div class="flex flex-col items-center">
+                            <i class="fas fa-users text-5xl mb-4 text-gray-200"></i>
+                            <p class="text-lg font-medium text-gray-700 mb-2">No employees yet</p>
+                            <p class="text-sm text-gray-500 mb-4">Add your first employee to get started</p>
+                            <button onclick="showAddEmployeeModal()" class="btn-primary px-6 py-3 rounded-lg font-medium">
+                                <i class="fas fa-user-plus mr-2"></i> Add First Employee
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+            `;
+            document.getElementById('employeeCount').textContent = '0 employees';
+            document.getElementById('totalTeamMembers').textContent = '0';
+            return;
+        }
+        
+        employees = employeesData;
+        
+        for (const emp of employees) {
+            const hoursThisWeek = await calculateEmployeeHoursThisWeek(emp.id);
+            const isActive = await isEmployeeActive(emp.id);
+            
+            const row = document.createElement('tr');
+            row.className = 'table-row';
+            row.innerHTML = `
+                <td class="py-4 px-6">
+                    <div class="flex items-center space-x-3">
+                        <div class="avatar" style="background: ${getEmployeeColor(emp.id)}">
+                            ${emp.firstName[0]}${emp.lastName[0]}
+                        </div>
+                        <div>
+                            <p class="font-medium text-gray-900">${emp.firstName} ${emp.lastName}</p>
+                            <p class="text-xs text-gray-500">${emp.position || 'No position set'}</p>
+                        </div>
+                    </div>
+                </td>
+                <td class="py-4 px-6">
+                    <span class="badge badge-primary">${emp.department}</span>
+                </td>
+                <td class="py-4 px-6">${emp.email || 'No email'}</td>
+                <td class="py-4 px-6">
+                    <div class="flex items-center">
+                        <span class="text-xl font-bold text-gray-900 mr-2">${hoursThisWeek.toFixed(1)}</span>
+                        <span class="text-sm text-gray-500">hours</span>
+                    </div>
+                </td>
+                <td class="py-4 px-6">
+                    <span class="badge ${isActive ? 'badge-success' : 'badge-warning'}">
+                        ${isActive ? 'Active' : 'Inactive'}
+                    </span>
+                </td>
+                <td class="py-4 px-6">
+                    <div class="flex space-x-2">
+                        <button onclick="exportEmployeeData('${emp.id}')" class="text-green-600 hover:text-green-800 p-2 rounded-lg hover:bg-green-50" title="Export Data">
+                            <i class="fas fa-download"></i>
+                        </button>
+                        <button onclick="deleteEmployee('${emp.id}')" class="text-red-600 hover:text-red-800 p-2 rounded-lg hover:bg-red-50" title="Delete">
+                            <i class="fas fa-trash"></i>
                         </button>
                     </div>
                 </td>
-            </tr>
-        `;
-        document.getElementById('employeeCount').textContent = '0 employees';
+            `;
+            table.appendChild(row);
+        }
+        
+        document.getElementById('totalTeamMembers').textContent = employees.length;
+        document.getElementById('employeeCount').textContent = `${employees.length} employees`;
+    } catch (error) {
+        showToast('Failed to load employees: ' + error.message, 'error');
+    }
+}
+
+async function calculateEmployeeHoursThisWeek(employeeId) {
+    try {
+        const recordsData = await api.getAdminRecords({
+            dateRange: 'week',
+            employeeId: employeeId
+        });
+        
+        const weekSeconds = recordsData.records?.reduce((sum, r) => sum + (r.durationSeconds || 0), 0) || 0;
+        return weekSeconds / 3600;
+    } catch (error) {
+        console.error('Error calculating hours:', error);
+        return 0;
+    }
+}
+
+async function isEmployeeActive(employeeId) {
+    try {
+        const recordsData = await api.getAdminRecords({
+            employeeId: employeeId
+        });
+        
+        // Check if any record from today exists
+        const today = new Date().toISOString().split('T')[0];
+        return recordsData.records?.some(r => r.date === today) || false;
+    } catch (error) {
+        console.error('Error checking active status:', error);
+        return false;
+    }
+}
+
+function showAddEmployeeModal() {
+    showModal('addEmployeeModal');
+}
+
+async function saveEmployee() {
+    const firstName = document.getElementById('firstName').value.trim();
+    const lastName = document.getElementById('lastName').value.trim();
+    const email = document.getElementById('employeeEmail').value.trim().toLowerCase();
+    const password = document.getElementById('employeePassword').value;
+    const department = document.getElementById('employeeDept').value;
+    const position = document.getElementById('employeePosition').value.trim();
+    
+    if (!firstName || !lastName || !email || !password) {
+        showToast('Please fill all required fields', 'error');
         return;
     }
-            
-            employeeList.forEach(emp => {
-                const hoursThisWeek = calculateEmployeeHoursThisWeek(emp.id);
-                const row = document.createElement('tr');
-                row.className = 'table-row';
-                row.innerHTML = `
-                    <td class="py-4 px-6">
-                        <div class="flex items-center space-x-3">
-                            <div class="avatar" style="background: ${getEmployeeColor(emp.id)}">
-                                ${emp.firstName[0]}${emp.lastName[0]}
-                            </div>
-                            <div>
-                                <p class="font-medium text-gray-900">${emp.firstName} ${emp.lastName}</p>
-                                <p class="text-xs text-gray-500">${emp.position || 'No position set'}</p>
-                            </div>
-                        </div>
-                    </td>
-                    <td class="py-4 px-6">
-                        <span class="badge badge-primary">${emp.department}</span>
-                    </td>
-                    <td class="py-4 px-6">${emp.email || 'No email'}</td>
-                    <td class="py-4 px-6">
-                        <div class="flex items-center">
-                            <span class="text-xl font-bold text-gray-900 mr-2">${hoursThisWeek.toFixed(1)}</span>
-                            <span class="text-sm text-gray-500">hours</span>
-                        </div>
-                    </td>
-                    <td class="py-4 px-6">
-                        <span class="badge ${isEmployeeActive(emp.id) ? 'badge-success' : 'badge-warning'}">
-                            ${isEmployeeActive(emp.id) ? 'Active' : 'Inactive'}
-                        </span>
-                    </td>
-                    <td class="py-4 px-6">
-                        <div class="flex space-x-2">
-                            <button onclick="exportEmployeeData('${emp.id}')" class="text-green-600 hover:text-green-800 p-2 rounded-lg hover:bg-green-50" title="Export Data">
-                                <i class="fas fa-download"></i>
-                            </button>
-                            <button onclick="deleteEmployee('${emp.id}')" class="text-red-600 hover:text-red-800 p-2 rounded-lg hover:bg-red-50" title="Delete">
-                                <i class="fas fa-trash"></i>
-                            </button>
-                        </div>
-                    </td>
-                `;
-                table.appendChild(row);
-            });
-            
-            document.getElementById('totalTeamMembers').textContent = employeeList.length;
-            document.getElementById('employeeCount').textContent = `${employeeList.length} employees`;
-        }
-
-        function showAddEmployeeModal() {
-            showModal('addEmployeeModal');
-        }
-
-        function saveEmployee() {
-            const firstName = document.getElementById('firstName').value.trim();
-            const lastName = document.getElementById('lastName').value.trim();
-            const email = document.getElementById('employeeEmail').value.trim().toLowerCase();
-            const password = document.getElementById('employeePassword').value;
-            const department = document.getElementById('employeeDept').value;
-            const position = document.getElementById('employeePosition').value.trim();
-            
-            if (!firstName || !lastName || !email || !password) {
-                showToast('Please fill all required fields', 'error');
-                return;
-            }
-            
-            if (employees.some(e => e.email.toLowerCase() === email)) {
-                showToast('Email already exists', 'error');
-                return;
-            }
-            
-            const newEmployee = {
-                id: 'emp_' + Date.now(),
-                firstName: firstName,
-                lastName: lastName,
-                email: email,
-                password: password,
-                role: 'employee',
-                department: department,
-                position: position,
-                employeeId: 'EMP' + (employees.filter(e => e.role === 'employee').length + 1).toString().padStart(3, '0'),
-                createdAt: new Date().toISOString()
-            };
-            
-            employees.push(newEmployee);
-            localStorage.setItem('ce_users', JSON.stringify(employees));
-            
-            document.getElementById('firstName').value = '';
-            document.getElementById('lastName').value = '';
-            document.getElementById('employeeEmail').value = '';
-            document.getElementById('employeePosition').value = '';
-            
-            closeModal('addEmployeeModal');
-            loadEmployeesTable();
-            loadEmployeeFilter();
-            updateDashboardStats();
-            updateCounts();
-            showToast('Employee added successfully', 'success');
-        }
-
-        function deleteEmployee(id) {
-            if (!confirm('Are you sure you want to delete this employee? All their time records will also be deleted.')) {
-                return;
-            }
-            
-            employees = employees.filter(emp => emp.id !== id);
-            timeRecords = timeRecords.filter(r => r.userId !== id);
-            
-            localStorage.setItem('ce_users', JSON.stringify(employees));
-            localStorage.setItem('ce_time_records', JSON.stringify(timeRecords));
-            
-            loadEmployeesTable();
-            loadEmployeeFilter();
-            loadAllRecords();
-            updateDashboardStats();
-            updateCounts();
-            showToast('Employee deleted', 'info');
-        }
-
-        function filterEmployees() {
-            const searchTerm = document.getElementById('employeeSearch').value.toLowerCase();
-            const rows = document.querySelectorAll('#employeesTable tr');
-            
-            rows.forEach(row => {
-                const text = row.textContent.toLowerCase();
-                if (text.includes(searchTerm)) {
-                    row.style.display = '';
-                } else {
-                    row.style.display = 'none';
-                }
-            });
-        }
-
-        function resetEmployeeSearch() {
-            document.getElementById('employeeSearch').value = '';
-            const rows = document.querySelectorAll('#employeesTable tr');
-            rows.forEach(row => row.style.display = '');
-        }
-
-        // ==================== RECORDS MANAGEMENT ====================
-        function loadAllRecords() {
-            const table = document.getElementById('allRecordsTable');
-            const filtered = timeRecords.filter(r => !r.isRunning)
-                .sort((a, b) => new Date(b.startTime) - new Date(a.startTime))
-                .slice(0, 100);
-            
-            table.innerHTML = '';
-            
-            if (filtered.length === 0) {
-                table.innerHTML = `
-                    <tr>
-                        <td colspan="7" class="py-8 text-center text-gray-500">
-                            <div class="flex flex-col items-center">
-                                <i class="fas fa-history text-4xl mb-3 text-gray-300"></i>
-                                <p class="font-medium text-gray-700">No time records found</p>
-                                <p class="text-sm text-gray-500 mt-1">Employees need to track time to see records here</p>
-                            </div>
-                        </td>
-                    </tr>
-                `;
-                return;
-            }
-            
-            filtered.forEach(record => {
-                const row = document.createElement('tr');
-                row.className = 'table-row';
-                row.innerHTML = `
-                    <td class="py-4 px-6">${record.date}</td>
-                    <td class="py-4 px-6">
-                        <div class="flex items-center space-x-2">
-                            <div class="avatar" style="background: ${getEmployeeColor(record.userId)}">
-                                ${record.userName ? record.userName.split(' ').map(n => n[0]).join('') : '??'}
-                            </div>
-                            <span class="font-medium">${record.userName}</span>
-                        </div>
-                    </td>
-                    <td class="py-4 px-6">
-                        <span class="badge badge-primary">${record.project}</span>
-                    </td>
-                    <td class="py-4 px-6">${record.task}</td>
-                    <td class="py-4 px-6">${new Date(record.startTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</td>
-                    <td class="py-4 px-6">${new Date(record.endTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</td>
-                    <td class="py-4 px-6 font-medium">${record.duration}</td>
-                `;
-                table.appendChild(row);
-            });
-            
-            document.getElementById('recordsCount').textContent = `${timeRecords.filter(r => !r.isRunning).length} total records`;
-        }
-
-        function filterRecords() {
-            const dateRange = document.getElementById('dateRangeFilter').value;
-            const employeeId = document.getElementById('employeeFilter').value;
-            const project = document.getElementById('projectFilter').value;
-            
-            let filtered = timeRecords.filter(r => !r.isRunning);
-            
-            const today = new Date().toISOString().split('T')[0];
-            const startOfWeek = new Date();
-            startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay() + 1);
-            const startOfMonth = new Date();
-            startOfMonth.setDate(1);
-            
-            if (dateRange === 'today') {
-                filtered = filtered.filter(r => r.date === today);
-            } else if (dateRange === 'week') {
-                filtered = filtered.filter(r => new Date(r.date) >= startOfWeek);
-            } else if (dateRange === 'month') {
-                filtered = filtered.filter(r => new Date(r.date) >= startOfMonth);
-            }
-            
-            if (employeeId !== 'all') {
-                filtered = filtered.filter(r => r.userId === employeeId);
-            }
-            
-            if (project !== 'all') {
-                filtered = filtered.filter(r => r.project === project);
-            }
-            
-            filtered.sort((a, b) => new Date(b.startTime) - new Date(a.startTime));
-            
-            const table = document.getElementById('allRecordsTable');
-            table.innerHTML = '';
-            
-            filtered.forEach(record => {
-                const row = document.createElement('tr');
-                row.className = 'table-row';
-                row.innerHTML = `
-                    <td class="py-4 px-6">${record.date}</td>
-                    <td class="py-4 px-6">
-                        <div class="flex items-center space-x-2">
-                            <div class="avatar" style="background: ${getEmployeeColor(record.userId)}">
-                                ${record.userName.split(' ').map(n => n[0]).join('')}
-                            </div>
-                            <span class="font-medium">${record.userName}</span>
-                        </div>
-                    </td>
-                    <td class="py-4 px-6">
-                        <span class="badge badge-primary">${record.project}</span>
-                    </td>
-                    <td class="py-4 px-6">${record.task}</td>
-                    <td class="py-4 px-6">${new Date(record.startTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</td>
-                    <td class="py-4 px-6">${new Date(record.endTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</td>
-                    <td class="py-4 px-6 font-medium">${record.duration}</td>
-                `;
-                table.appendChild(row);
-            });
-            
-            document.getElementById('recordsCount').textContent = `${filtered.length} filtered records`;
-        }
-
-        function resetFilters() {
-            document.getElementById('dateRangeFilter').value = 'today';
-            document.getElementById('employeeFilter').value = 'all';
-            document.getElementById('projectFilter').value = 'all';
-            loadAllRecords();
-        }
-
-        function loadEmployeeFilter() {
-            const filter = document.getElementById('employeeFilter');
-            const employeeList = employees.filter(e => e.role === 'employee');
-            
-            filter.innerHTML = '<option value="all">All Employees</option>';
-            employeeList.forEach(emp => {
-                const option = document.createElement('option');
-                option.value = emp.id;
-                option.textContent = `${emp.firstName} ${emp.lastName}`;
-                filter.appendChild(option);
-            });
-        }
-
-        function loadProjectFilter() {
-            const filter = document.getElementById('projectFilter');
-            const projects = [...new Set(timeRecords.map(r => r.project))].sort();
-            
-            filter.innerHTML = '<option value="all">All Projects</option>';
-            projects.forEach(project => {
-                const option = document.createElement('option');
-                option.value = project;
-                option.textContent = project;
-                filter.appendChild(option);
-            });
-        }
-
-        // ==================== DASHBOARD FUNCTIONS ====================
-        function updateDashboardStats() {
-            const today = new Date().toISOString().split('T')[0];
-            const todayRecords = timeRecords.filter(r => r.date === today && !r.isRunning);
-            const totalSecondsToday = todayRecords.reduce((sum, r) => sum + (r.durationSeconds || 0), 0);
-            const totalHoursToday = (totalSecondsToday / 3600).toFixed(1);
-            
-            const startOfWeek = new Date();
-            startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay() + 1);
-            const weekRecords = timeRecords.filter(r => new Date(r.date) >= startOfWeek && !r.isRunning);
-            const weeklySeconds = weekRecords.reduce((sum, r) => sum + (r.durationSeconds || 0), 0);
-            const weeklyTotal = (weeklySeconds / 3600).toFixed(1);
-            
-            const activeTimers = timeRecords.filter(r => r.isRunning).length;
-            
-            document.getElementById('totalHoursToday').textContent = totalHoursToday;
-            document.getElementById('weeklyTotal').textContent = weeklyTotal;
-            document.getElementById('activeTimersNow').textContent = activeTimers;
-            document.getElementById('daysThisWeek').textContent = new Set(weekRecords.map(r => r.date)).size;
-            
-            const activeToday = new Set(todayRecords.map(r => r.userId)).size;
-            document.getElementById('activeToday').textContent = activeToday;
-            
-            const uniqueDays = new Set(weekRecords.map(r => r.date)).size;
-            const avgHoursPerDay = uniqueDays > 0 ? (weeklySeconds / 3600 / uniqueDays).toFixed(1) : '0.0';
-            document.getElementById('avgHoursPerDay').textContent = avgHoursPerDay;
-            
-            updateDashboardActivity();
-            updateCharts();
-        }
-
-        function updateDashboardActivity() {
-            const container = document.getElementById('dashboardActivity');
-            const today = new Date().toISOString().split('T')[0];
-            const todayRecords = timeRecords.filter(r => r.date === today)
-                .sort((a, b) => new Date(b.startTime) - new Date(a.startTime))
-                .slice(0, 5);
-            
-            container.innerHTML = '';
-            
-            if (todayRecords.length === 0) {
-                container.innerHTML = `
-                    <div class="text-center py-8 text-gray-400">
-                        <i class="fas fa-clock text-4xl mb-3"></i>
-                        <p>No activity recorded today</p>
-                    </div>
-                `;
-                return;
-            }
-            
-            todayRecords.forEach(record => {
-                const activity = document.createElement('div');
-                activity.className = 'flex items-center p-4 hover:bg-gray-50 rounded-xl transition-colors';
-                
-                const icon = record.isRunning ? 'play-circle' : 'stop-circle';
-                const iconColor = record.isRunning ? 'text-green-500' : 'text-blue-500';
-                
-                activity.innerHTML = `
-                    <div class="flex-shrink-0">
-                        <div class="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center">
-                            <i class="fas fa-${icon} ${iconColor}"></i>
-                        </div>
-                    </div>
-                    <div class="ml-4 flex-1">
-                        <div class="flex justify-between">
-                            <p class="font-medium text-gray-900">${record.userName}</p>
-                            <span class="text-sm font-medium text-gray-900">${record.duration || 'In progress'}</span>
-                        </div>
-                        <div class="flex items-center mt-1">
-                            <span class="badge badge-primary mr-3">${record.project}</span>
-                            <span class="text-xs text-gray-500">${record.task}</span>
-                        </div>
-                    </div>
-                `;
-                container.appendChild(activity);
-            });
-        }
-
-        function updateDepartmentOverview() {
-            const container = document.getElementById('departmentOverview');
-            const deptStats = {};
-            
-            employees.forEach(emp => {
-                if (emp.role === 'employee') {
-                    if (!deptStats[emp.department]) {
-                        deptStats[emp.department] = {
-                            count: 0,
-                            hours: 0,
-                            employees: []
-                        };
-                    }
-                    deptStats[emp.department].count++;
-                    deptStats[emp.department].employees.push(emp);
-                }
-            });
-            
-            const startOfWeek = new Date();
-            startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay() + 1);
-            
-            timeRecords.filter(r => {
-                const recordDate = new Date(r.date);
-                return recordDate >= startOfWeek && !r.isRunning;
-            }).forEach(r => {
-                const employee = employees.find(e => e.id === r.userId);
-                if (employee && deptStats[employee.department]) {
-                    deptStats[employee.department].hours += (r.durationSeconds || 0) / 3600;
-                }
-            });
-            
-            let html = '';
-            if (Object.keys(deptStats).length === 0) {
-                html = '<div class="text-center py-4 text-gray-500"><p>No department data available</p></div>';
-            } else {
-                Object.entries(deptStats).forEach(([dept, stats]) => {
-                    html += `
-                        <div class="mb-6 last:mb-0 p-4 bg-gray-50 rounded-xl">
-                            <div class="flex justify-between items-center mb-3">
-                                <span class="font-medium text-gray-900">${dept}</span>
-                                <span class="text-sm text-gray-500">${stats.count} employees</span>
-                            </div>
-                            <div class="text-sm text-gray-600 mb-3">
-                                <i class="fas fa-clock mr-1"></i> ${stats.hours.toFixed(1)} hours this week
-                            </div>
-                            <div class="text-xs text-gray-500">
-                                ${stats.employees.map(e => e.firstName).join(', ')}
-                            </div>
-                        </div>
-                    `;
-                });
-            }
-            
-            container.innerHTML = html;
-        }
-
-        // ==================== CHART FUNCTIONS ====================
-        function initializeCharts() {
-            // Daily Trend Chart
-            const dailyCtx = document.getElementById('dailyTrendChart').getContext('2d');
-            dailyTrendChart = new Chart(dailyCtx, {
-                type: 'line',
-                data: {
-                    labels: [],
-                    datasets: [{
-                        label: 'Hours',
-                        data: [],
-                        backgroundColor: 'rgba(30, 64, 175, 0.1)',
-                        borderColor: 'rgba(30, 64, 175, 1)',
-                        borderWidth: 3,
-                        tension: 0.4,
-                        fill: true,
-                        pointBackgroundColor: 'rgba(30, 64, 175, 1)',
-                        pointBorderColor: '#ffffff',
-                        pointBorderWidth: 2,
-                        pointRadius: 6
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            grid: {
-                                drawBorder: false,
-                            },
-                            ticks: {
-                                callback: function(value) {
-                                    return value + 'h';
-                                }
-                            }
-                        },
-                        x: {
-                            grid: {
-                                display: false
-                            }
-                        }
-                    },
-                    plugins: {
-                        legend: {
-                            display: false
-                        },
-                        tooltip: {
-                            callbacks: {
-                                label: function(context) {
-                                    return context.parsed.y + ' hours';
-                                }
-                            }
-                        }
-                    }
-                }
-            });
-            
-            // Department Chart
-            const deptCtx = document.getElementById('departmentChart').getContext('2d');
-            departmentChart = new Chart(deptCtx, {
-                type: 'pie',
-                data: {
-                    labels: [],
-                    datasets: [{
-                        data: [],
-                        backgroundColor: [
-                            'rgba(30, 64, 175, 0.8)',
-                            'rgba(16, 185, 129, 0.8)',
-                            'rgba(139, 92, 246, 0.8)',
-                            'rgba(245, 158, 11, 0.8)',
-                            'rgba(239, 68, 68, 0.8)',
-                            'rgba(99, 102, 241, 0.8)'
-                        ],
-                        borderWidth: 0,
-                        borderRadius: 8
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: {
-                            position: 'bottom',
-                            labels: {
-                                padding: 20,
-                                usePointStyle: true,
-                                pointStyle: 'circle'
-                            }
-                        }
-                    }
-                }
-            });
-            
-            // Productivity Chart
-            const prodCtx = document.getElementById('productivityChart').getContext('2d');
-            productivityChart = new Chart(prodCtx, {
-                type: 'bar',
-                data: {
-                    labels: [],
-                    datasets: [{
-                        label: 'Productivity %',
-                        data: [],
-                        backgroundColor: 'rgba(16, 185, 129, 0.2)',
-                        borderColor: 'rgba(16, 185, 129, 1)',
-                        borderWidth: 2,
-                        borderRadius: 8
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            max: 100,
-                            grid: {
-                                drawBorder: false,
-                            },
-                            ticks: {
-                                callback: function(value) {
-                                    return value + '%';
-                                }
-                            }
-                        },
-                        x: {
-                            grid: {
-                                display: false
-                            }
-                        }
-                    },
-                    plugins: {
-                        legend: {
-                            display: false
-                        }
-                    }
-                }
-            });
-            
-            // Project Distribution Chart
-            const projectCtx = document.getElementById('projectDistributionChart').getContext('2d');
-            projectDistributionChart = new Chart(projectCtx, {
-                type: 'polarArea',
-                data: {
-                    labels: [],
-                    datasets: [{
-                        data: [],
-                        backgroundColor: [
-                            'rgba(30, 64, 175, 0.8)',
-                            'rgba(16, 185, 129, 0.8)',
-                            'rgba(139, 92, 246, 0.8)',
-                            'rgba(245, 158, 11, 0.8)',
-                            'rgba(239, 68, 68, 0.8)'
-                        ],
-                        borderWidth: 0
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: {
-                            position: 'right',
-                            labels: {
-                                padding: 20,
-                                usePointStyle: true
-                            }
-                        }
-                    }
-                }
-            });
-            
-            updateCharts();
-        }
-
-        function updateCharts() {
-            updateDailyTrendChart();
-            updateDepartmentChart();
-            updateProductivityChart();
-            updateProjectDistributionChart();
-        }
-
-        function updateDailyTrendChart() {
-            if (!dailyTrendChart) return;
-            
-            const labels = [];
-            const data = [];
-            
-            // Get last 7 days
-            for (let i = 6; i >= 0; i--) {
-                const date = new Date();
-                date.setDate(date.getDate() - i);
-                const dateStr = date.toISOString().split('T')[0];
-                const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
-                
-                labels.push(dayName);
-                
-                const dayRecords = timeRecords.filter(r => r.date === dateStr && !r.isRunning);
-                const dayHours = dayRecords.reduce((sum, r) => sum + (r.durationSeconds || 0), 0) / 3600;
-                data.push(dayHours);
-            }
-            
-            dailyTrendChart.data.labels = labels;
-            dailyTrendChart.data.datasets[0].data = data;
-            dailyTrendChart.update();
-        }
-
-        function updateDepartmentChart() {
-            if (!departmentChart) return;
-            
-            const deptHours = {};
-            const startOfWeek = new Date();
-            startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay() + 1);
-            
-            timeRecords.filter(r => new Date(r.date) >= startOfWeek && !r.isRunning)
-                .forEach(r => {
-                    const employee = employees.find(e => e.id === r.userId);
-                    if (employee && employee.department) {
-                        if (!deptHours[employee.department]) {
-                            deptHours[employee.department] = 0;
-                        }
-                        deptHours[employee.department] += (r.durationSeconds || 0) / 3600;
-                    }
-                });
-            
-            departmentChart.data.labels = Object.keys(deptHours);
-            departmentChart.data.datasets[0].data = Object.values(deptHours);
-            departmentChart.update();
-        }
-
-        function updateProductivityChart() {
-            if (!productivityChart) return;
-            
-            const labels = [];
-            const data = [];
-            
-            // Get productivity for last 5 employees
-            const employeeList = employees.filter(e => e.role === 'employee').slice(0, 5);
-            
-            employeeList.forEach(emp => {
-                const startOfWeek = new Date();
-                startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay() + 1);
-                
-                const weekRecords = timeRecords.filter(r => 
-                    r.userId === emp.id && 
-                    new Date(r.date) >= startOfWeek && 
-                    !r.isRunning
-                );
-                
-                const weekHours = weekRecords.reduce((sum, r) => sum + (r.durationSeconds || 0), 0) / 3600;
-                const productivity = Math.min((weekHours / 40) * 100, 100); // 40 hour week target
-                
-                labels.push(emp.firstName);
-                data.push(productivity);
-            });
-            
-            productivityChart.data.labels = labels;
-            productivityChart.data.datasets[0].data = data;
-            productivityChart.update();
-        }
-
-        function updateProjectDistributionChart() {
-            if (!projectDistributionChart) return;
-            
-            const projectHours = {};
-            const startOfWeek = new Date();
-            startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay() + 1);
-            
-            timeRecords.filter(r => new Date(r.date) >= startOfWeek && !r.isRunning)
-                .forEach(r => {
-                    if (!projectHours[r.project]) {
-                        projectHours[r.project] = 0;
-                    }
-                    projectHours[r.project] += (r.durationSeconds || 0) / 3600;
-                });
-            
-            // Get top 5 projects
-            const sortedProjects = Object.entries(projectHours)
-                .sort((a, b) => b[1] - a[1])
-                .slice(0, 5);
-            
-            projectDistributionChart.data.labels = sortedProjects.map(p => p[0]);
-            projectDistributionChart.data.datasets[0].data = sortedProjects.map(p => p[1]);
-            projectDistributionChart.update();
-        }
-
-        function updateAnalytics() {
-            updatePerformanceSummary();
-        }
-
-        function updatePerformanceSummary() {
-            const container = document.getElementById('performanceSummary');
-            
-            const startOfWeek = new Date();
-            startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay() + 1);
-            
-            // Calculate team stats
-            const weekRecords = timeRecords.filter(r => new Date(r.date) >= startOfWeek && !r.isRunning);
-            const totalHours = weekRecords.reduce((sum, r) => sum + (r.durationSeconds || 0), 0) / 3600;
-            const uniqueEmployees = new Set(weekRecords.map(r => r.userId)).size;
-            const avgHoursPerEmployee = uniqueEmployees > 0 ? totalHours / uniqueEmployees : 0;
-            
-            // Find top performer
-            const employeeHours = {};
-            weekRecords.forEach(r => {
-                if (!employeeHours[r.userId]) {
-                    employeeHours[r.userId] = 0;
-                }
-                employeeHours[r.userId] += (r.durationSeconds || 0) / 3600;
-            });
-            
-            let topPerformer = null;
-            let maxHours = 0;
-            Object.entries(employeeHours).forEach(([id, hours]) => {
-                if (hours > maxHours) {
-                    maxHours = hours;
-                    const emp = employees.find(e => e.id === id);
-                    if (emp) topPerformer = emp;
-                }
-            });
-            
-            container.innerHTML = `
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div class="bg-blue-50 p-6 rounded-xl">
-                        <div class="flex items-center mb-3">
-                            <div class="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center mr-3">
-                                <i class="fas fa-clock text-blue-600"></i>
-                            </div>
-                            <div>
-                                <p class="text-sm font-medium text-blue-900">Total Team Hours</p>
-                                <p class="text-2xl font-bold text-gray-900">${totalHours.toFixed(1)}</p>
-                            </div>
-                        </div>
-                        <p class="text-sm text-blue-700">This week</p>
-                    </div>
-                    
-                    <div class="bg-green-50 p-6 rounded-xl">
-                        <div class="flex items-center mb-3">
-                            <div class="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center mr-3">
-                                <i class="fas fa-users text-green-600"></i>
-                            </div>
-                            <div>
-                                <p class="text-sm font-medium text-green-900">Avg. Hours/Employee</p>
-                                <p class="text-2xl font-bold text-gray-900">${avgHoursPerEmployee.toFixed(1)}</p>
-                            </div>
-                        </div>
-                        <p class="text-sm text-green-700">Weekly average</p>
-                    </div>
-                    
-                    <div class="bg-purple-50 p-6 rounded-xl">
-                        <div class="flex items-center mb-3">
-                            <div class="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center mr-3">
-                                <i class="fas fa-trophy text-purple-600"></i>
-                            </div>
-                            <div>
-                                <p class="text-sm font-medium text-purple-900">Top Performer</p>
-                                <p class="text-xl font-bold text-gray-900">${topPerformer ? topPerformer.firstName + ' ' + topPerformer.lastName : 'None'}</p>
-                            </div>
-                        </div>
-                        <p class="text-sm text-purple-700">${maxHours.toFixed(1)} hours this week</p>
-                    </div>
-                </div>
-            `;
-        }
-
-        // ==================== EXPORT FUNCTIONS ====================
-        function exportAllData() {
-            const employeeRecords = timeRecords.filter(r => !r.isRunning);
-            
-            if (employeeRecords.length === 0) {
-                showToast('No data to export', 'info');
-                return;
-            }
-            
-            let csv = 'Date,Employee,Email,Department,Project,Task,Start Time,End Time,Duration (hours),Duration\n';
-            
-            employeeRecords.forEach(record => {
-                const employee = employees.find(e => e.id === record.userId);
-                const department = employee ? employee.department : 'Unknown';
-                const hours = (record.durationSeconds || 0) / 3600;
-                csv += `"${record.date}","${record.userName}","${record.userEmail || ''}","${department}","${record.project}","${record.task}","${record.startTime}","${record.endTime}",${hours.toFixed(2)},"${record.duration}"\n`;
-            });
-            
-            const blob = new Blob([csv], { type: 'text/csv' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `codeex-all-data-${new Date().toISOString().split('T')[0]}.csv`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            
-            showToast('All data exported to CSV', 'success');
-        }
-
-        function exportAllRecords() {
-            exportAllData();
-        }
-
-        function exportEmployeeData(employeeId) {
-            const employee = employees.find(e => e.id === employeeId);
-            const employeeRecords = timeRecords.filter(r => r.userId === employeeId && !r.isRunning);
-            
-            if (employeeRecords.length === 0) {
-                showToast('No data found for this employee', 'info');
-                return;
-            }
-            
-            let csv = `Employee Time Report: ${employee.firstName} ${employee.lastName}\n`;
-            csv += `Department: ${employee.department}\n`;
-            csv += `Position: ${employee.position || 'Not specified'}\n`;
-            csv += `Generated: ${new Date().toLocaleDateString()}\n\n`;
-            csv += 'Date,Project,Task,Start Time,End Time,Duration (hours),Duration\n';
-            
-            employeeRecords.forEach(record => {
-                const hours = (record.durationSeconds || 0) / 3600;
-                csv += `"${record.date}","${record.project}","${record.task}","${record.startTime}","${record.endTime}",${hours.toFixed(2)},"${record.duration}"\n`;
-            });
-            
-            const totalHours = employeeRecords.reduce((sum, r) => sum + (r.durationSeconds || 0), 0) / 3600;
-            const avgSession = employeeRecords.length > 0 ? totalHours / employeeRecords.length : 0;
-            const daysActive = new Set(employeeRecords.map(r => r.date)).size;
-            
-            csv += `\nSummary:\n`;
-            csv += `Total Hours: ${totalHours.toFixed(2)}\n`;
-            csv += `Total Sessions: ${employeeRecords.length}\n`;
-            csv += `Days Active: ${daysActive}\n`;
-            csv += `Average Session: ${avgSession.toFixed(2)} hours\n`;
-            csv += `Average Daily: ${daysActive > 0 ? (totalHours / daysActive).toFixed(2) : 0} hours\n`;
-            
-            const blob = new Blob([csv], { type: 'text/csv' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `${employee.firstName}-${employee.lastName}-time-report-${new Date().toISOString().split('T')[0]}.csv`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            
-            showToast('Employee data exported', 'success');
-        }
-
-        // ==================== UTILITY FUNCTIONS ====================
-        function calculateEmployeeHoursThisWeek(employeeId) {
-            const startOfWeek = new Date();
-            startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay() + 1);
-            
-            return timeRecords
-                .filter(r => r.userId === employeeId && new Date(r.date) >= startOfWeek && !r.isRunning)
-                .reduce((sum, r) => sum + (r.durationSeconds || 0), 0) / 3600;
-        }
-
-        function isEmployeeActive(employeeId) {
-            return timeRecords.some(r => r.userId === employeeId && r.isRunning);
-        }
-
-        function getEmployeeColor(employeeId) {
-            const colors = [
-                '#1e40af', '#047857', '#7c3aed', '#f59e0b', 
-                '#ef4444', '#8b5cf6', '#0ea5e9'
-            ];
-            const index = employees.findIndex(e => e.id === employeeId);
-            return colors[Math.abs(index) % colors.length] || '#1e40af';
-        }
-
-        function formatDuration(totalSeconds) {
-            const hours = Math.floor(totalSeconds / 3600);
-            const minutes = Math.floor((totalSeconds % 3600) / 60);
-            const seconds = totalSeconds % 60;
-            
-            if (hours > 0) {
-                return `${hours}h ${minutes}m`;
-            } else if (minutes > 0) {
-                return `${minutes}m ${seconds}s`;
-            } else {
-                return `${seconds}s`;
-            }
-        }
-
-        function showToast(message, type = 'info') {
-            const toast = document.getElementById('toast');
-            
-            let icon = 'fa-info-circle';
-            let bgColor = 'bg-blue-600';
-            
-            if (type === 'success') {
-                icon = 'fa-check-circle';
-                bgColor = 'bg-green-600';
-            } else if (type === 'error') {
-                icon = 'fa-exclamation-circle';
-                bgColor = 'bg-red-600';
-            } else if (type === 'warning') {
-                icon = 'fa-exclamation-triangle';
-                bgColor = 'bg-yellow-600';
-            }
-            
-            toast.className = `toast ${bgColor}`;
-            toast.innerHTML = `
-                <div class="flex items-center space-x-3">
-                    <i class="fas ${icon}"></i>
-                    <span>${message}</span>
-                </div>
-            `;
-            
-            toast.classList.remove('hidden');
-            
-            setTimeout(() => {
-                toast.classList.add('hidden');
-            }, 3000);
-        }
-
-        function showModal(modalId) {
-            document.getElementById(modalId).style.display = 'block';
-        }
-
-        function closeModal(modalId) {
-            document.getElementById(modalId).style.display = 'none';
-        }
-
-        // Close modal when clicking outside
-        window.addEventListener('click', function(event) {
-            const modals = document.querySelectorAll('.modal');
-            modals.forEach(modal => {
-                if (event.target === modal) {
-                    modal.style.display = 'none';
-                }
-            });
+    
+    try {
+        await api.addEmployee({
+            firstName,
+            lastName,
+            email,
+            password,
+            department,
+            position
         });
+        
+        document.getElementById('firstName').value = '';
+        document.getElementById('lastName').value = '';
+        document.getElementById('employeeEmail').value = '';
+        document.getElementById('employeePosition').value = '';
+        
+        closeModal('addEmployeeModal');
+        await loadEmployeesTable();
+        await loadEmployeeFilter();
+        await updateDashboardStats();
+        await updateCounts();
+        showToast('Employee added successfully', 'success');
+    } catch (error) {
+        showToast('Failed to add employee: ' + error.message, 'error');
+    }
+}
 
-        console.log('Admin Portal loaded successfully');
+async function deleteEmployee(id) {
+    if (!confirm('Are you sure you want to delete this employee? All their time records will also be deleted.')) {
+        return;
+    }
+    
+    try {
+        await api.deleteEmployee(id);
+        
+        await loadEmployeesTable();
+        await loadEmployeeFilter();
+        await loadAllRecords();
+        await updateDashboardStats();
+        await updateCounts();
+        showToast('Employee deleted successfully', 'info');
+    } catch (error) {
+        showToast('Failed to delete employee: ' + error.message, 'error');
+    }
+}
 
+function filterEmployees() {
+    const searchTerm = document.getElementById('employeeSearch').value.toLowerCase();
+    const rows = document.querySelectorAll('#employeesTable tr');
+    
+    rows.forEach(row => {
+        const text = row.textContent.toLowerCase();
+        if (text.includes(searchTerm)) {
+            row.style.display = '';
+        } else {
+            row.style.display = 'none';
+        }
+    });
+}
 
+function resetEmployeeSearch() {
+    document.getElementById('employeeSearch').value = '';
+    const rows = document.querySelectorAll('#employeesTable tr');
+    rows.forEach(row => row.style.display = '');
+}
 
+// ==================== RECORDS MANAGEMENT ====================
+async function loadAllRecords() {
+    try {
+        const recordsData = await api.getAdminRecords();
+        const table = document.getElementById('allRecordsTable');
+        
+        table.innerHTML = '';
+        
+        if (!recordsData.records || recordsData.records.length === 0) {
+            table.innerHTML = `
+                <tr>
+                    <td colspan="7" class="py-8 text-center text-gray-500">
+                        <div class="flex flex-col items-center">
+                            <i class="fas fa-history text-4xl mb-3 text-gray-300"></i>
+                            <p class="font-medium text-gray-700">No time records found</p>
+                            <p class="text-sm text-gray-500 mt-1">Employees need to track time to see records here</p>
+                        </div>
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+        
+        timeRecords = recordsData.records;
+        
+        timeRecords.forEach(record => {
+            const row = document.createElement('tr');
+            row.className = 'table-row';
+            row.innerHTML = `
+                <td class="py-4 px-6">${record.date}</td>
+                <td class="py-4 px-6">
+                    <div class="flex items-center space-x-2">
+                        <div class="avatar" style="background: ${getEmployeeColor(record.userId)}">
+                            ${record.userName ? record.userName.split(' ').map(n => n[0]).join('') : '??'}
+                        </div>
+                        <span class="font-medium">${record.userName}</span>
+                    </div>
+                </td>
+                <td class="py-4 px-6">
+                    <span class="badge badge-primary">${record.project}</span>
+                </td>
+                <td class="py-4 px-6">${record.task}</td>
+                <td class="py-4 px-6">${new Date(record.startTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</td>
+                <td class="py-4 px-6">${new Date(record.endTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</td>
+                <td class="py-4 px-6 font-medium">${record.duration}</td>
+            `;
+            table.appendChild(row);
+        });
+        
+        document.getElementById('recordsCount').textContent = `${recordsData.total} total records`;
+    } catch (error) {
+        showToast('Failed to load records: ' + error.message, 'error');
+    }
+}
 
+async function filterRecords() {
+    const dateRange = document.getElementById('dateRangeFilter').value;
+    const employeeId = document.getElementById('employeeFilter').value;
+    const project = document.getElementById('projectFilter').value;
+    
+    try {
+        const recordsData = await api.getAdminRecords({
+            dateRange,
+            employeeId,
+            project
+        });
+        
+        const table = document.getElementById('allRecordsTable');
+        table.innerHTML = '';
+        
+        recordsData.records?.forEach(record => {
+            const row = document.createElement('tr');
+            row.className = 'table-row';
+            row.innerHTML = `
+                <td class="py-4 px-6">${record.date}</td>
+                <td class="py-4 px-6">
+                    <div class="flex items-center space-x-2">
+                        <div class="avatar" style="background: ${getEmployeeColor(record.userId)}">
+                            ${record.userName.split(' ').map(n => n[0]).join('')}
+                        </div>
+                        <span class="font-medium">${record.userName}</span>
+                    </div>
+                </td>
+                <td class="py-4 px-6">
+                    <span class="badge badge-primary">${record.project}</span>
+                </td>
+                <td class="py-4 px-6">${record.task}</td>
+                <td class="py-4 px-6">${new Date(record.startTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</td>
+                <td class="py-4 px-6">${new Date(record.endTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</td>
+                <td class="py-4 px-6 font-medium">${record.duration}</td>
+            `;
+            table.appendChild(row);
+        });
+        
+        document.getElementById('recordsCount').textContent = `${recordsData.records?.length || 0} filtered records`;
+    } catch (error) {
+        showToast('Failed to filter records: ' + error.message, 'error');
+    }
+}
 
-        // Add this to your JavaScript section in both files
+async function resetFilters() {
+    document.getElementById('dateRangeFilter').value = 'today';
+    document.getElementById('employeeFilter').value = 'all';
+    document.getElementById('projectFilter').value = 'all';
+    await loadAllRecords();
+}
 
-// Mobile menu toggle
+async function loadEmployeeFilter() {
+    try {
+        const employeesData = await api.getEmployees();
+        const filter = document.getElementById('employeeFilter');
+        
+        filter.innerHTML = '<option value="all">All Employees</option>';
+        employeesData.forEach(emp => {
+            const option = document.createElement('option');
+            option.value = emp.id;
+            option.textContent = `${emp.firstName} ${emp.lastName}`;
+            filter.appendChild(option);
+        });
+    } catch (error) {
+        console.error('Error loading employee filter:', error);
+    }
+}
+
+async function loadProjectFilter() {
+    try {
+        const recordsData = await api.getAdminRecords();
+        const filter = document.getElementById('projectFilter');
+        
+        filter.innerHTML = '<option value="all">All Projects</option>';
+        recordsData.projects?.forEach(project => {
+            const option = document.createElement('option');
+            option.value = project;
+            option.textContent = project;
+            filter.appendChild(option);
+        });
+    } catch (error) {
+        console.error('Error loading project filter:', error);
+    }
+}
+
+// ==================== DASHBOARD FUNCTIONS ====================
+async function updateDashboardStats() {
+    try {
+        const statsData = await api.getAdminDashboardStats();
+        
+        if (statsData.success) {
+            const stats = statsData.stats;
+            
+            document.getElementById('totalHoursToday').textContent = stats.totalHoursToday;
+            document.getElementById('weeklyTotal').textContent = stats.weeklyTotal;
+            document.getElementById('activeTimersNow').textContent = stats.activeTimersNow;
+            document.getElementById('daysThisWeek').textContent = stats.daysThisWeek;
+            document.getElementById('activeToday').textContent = stats.activeToday;
+            document.getElementById('avgHoursPerDay').textContent = stats.avgHoursPerDay;
+        }
+        
+        await updateDashboardActivity();
+        updateCharts();
+    } catch (error) {
+        console.error('Error updating dashboard stats:', error);
+    }
+}
+
+async function updateDashboardActivity() {
+    try {
+        const recordsData = await api.getAdminRecords({ dateRange: 'today' });
+        const container = document.getElementById('dashboardActivity');
+        
+        container.innerHTML = '';
+        
+        if (!recordsData.records || recordsData.records.length === 0) {
+            container.innerHTML = `
+                <div class="text-center py-8 text-gray-400">
+                    <i class="fas fa-clock text-4xl mb-3"></i>
+                    <p>No activity recorded today</p>
+                </div>
+            `;
+            return;
+        }
+        
+        const todayRecords = recordsData.records.slice(0, 5);
+        
+        todayRecords.forEach(record => {
+            const activity = document.createElement('div');
+            activity.className = 'flex items-center p-4 hover:bg-gray-50 rounded-xl transition-colors';
+            
+            activity.innerHTML = `
+                <div class="flex-shrink-0">
+                    <div class="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center">
+                        <i class="fas fa-clock text-blue-500"></i>
+                    </div>
+                </div>
+                <div class="ml-4 flex-1">
+                    <div class="flex justify-between">
+                        <p class="font-medium text-gray-900">${record.userName}</p>
+                        <span class="text-sm font-medium text-gray-900">${record.duration || 'Completed'}</span>
+                    </div>
+                    <div class="flex items-center mt-1">
+                        <span class="badge badge-primary mr-3">${record.project}</span>
+                        <span class="text-xs text-gray-500">${record.task}</span>
+                    </div>
+                </div>
+            `;
+            container.appendChild(activity);
+        });
+    } catch (error) {
+        console.error('Error updating activity:', error);
+    }
+}
+
+async function updateDepartmentOverview() {
+    try {
+        const deptData = await api.getDepartments();
+        const container = document.getElementById('departmentOverview');
+        
+        if (!deptData.success || !deptData.departments) {
+            container.innerHTML = '<div class="text-center py-4 text-gray-500"><p>No department data available</p></div>';
+            return;
+        }
+        
+        let html = '';
+        Object.entries(deptData.departments).forEach(([dept, stats]) => {
+            html += `
+                <div class="mb-6 last:mb-0 p-4 bg-gray-50 rounded-xl">
+                    <div class="flex justify-between items-center mb-3">
+                        <span class="font-medium text-gray-900">${dept}</span>
+                        <span class="text-sm text-gray-500">${stats.count} employees</span>
+                    </div>
+                    <div class="text-sm text-gray-600 mb-3">
+                        <i class="fas fa-clock mr-1"></i> ${stats.hours.toFixed(1)} hours this week
+                    </div>
+                    <div class="text-xs text-gray-500">
+                        ${stats.employees.map(e => e.name).join(', ')}
+                    </div>
+                </div>
+            `;
+        });
+        
+        container.innerHTML = html;
+    } catch (error) {
+        console.error('Error updating department overview:', error);
+    }
+}
+
+// ==================== CHART FUNCTIONS ====================
+// (Keep your existing chart functions, they should work with the API data)
+// Initialize and update charts as before...
+
+// ==================== UTILITY FUNCTIONS ====================
+function getEmployeeColor(employeeId) {
+    const colors = [
+        '#1e40af', '#047857', '#7c3aed', '#f59e0b', 
+        '#ef4444', '#8b5cf6', '#0ea5e9'
+    ];
+    const index = employees.findIndex(e => e.id === employeeId);
+    return colors[Math.abs(index) % colors.length] || '#1e40af';
+}
+
+function showToast(message, type = 'info') {
+    const toast = document.getElementById('toast');
+    
+    let icon = 'fa-info-circle';
+    let bgColor = 'bg-blue-600';
+    
+    if (type === 'success') {
+        icon = 'fa-check-circle';
+        bgColor = 'bg-green-600';
+    } else if (type === 'error') {
+        icon = 'fa-exclamation-circle';
+        bgColor = 'bg-red-600';
+    } else if (type === 'warning') {
+        icon = 'fa-exclamation-triangle';
+        bgColor = 'bg-yellow-600';
+    }
+    
+    toast.className = `toast ${bgColor}`;
+    toast.innerHTML = `
+        <div class="flex items-center space-x-3">
+            <i class="fas ${icon}"></i>
+            <span>${message}</span>
+        </div>
+    `;
+    
+    toast.classList.remove('hidden');
+    
+    setTimeout(() => {
+        toast.classList.add('hidden');
+    }, 3000);
+}
+
+function showModal(modalId) {
+    document.getElementById(modalId).style.display = 'block';
+}
+
+function closeModal(modalId) {
+    document.getElementById(modalId).style.display = 'none';
+}
+
+window.addEventListener('click', function(event) {
+    const modals = document.querySelectorAll('.modal');
+    modals.forEach(modal => {
+        if (event.target === modal) {
+            modal.style.display = 'none';
+        }
+    });
+});
+
+// Mobile menu functions
 function toggleMobileMenu() {
     const sidebar = document.querySelector('.sidebar');
     sidebar.classList.toggle('active');
 }
 
-// Close mobile menu when clicking outside
 document.addEventListener('click', function(e) {
     const sidebar = document.querySelector('.sidebar');
     const mobileToggle = document.querySelector('.mobile-menu-toggle');
@@ -2189,7 +1673,6 @@ document.addEventListener('click', function(e) {
     }
 });
 
-// Auto-close sidebar on menu item click (for mobile)
 document.querySelectorAll('.sidebar-item').forEach(item => {
     item.addEventListener('click', function() {
         if (window.innerWidth <= 768) {
@@ -2199,27 +1682,9 @@ document.querySelectorAll('.sidebar-item').forEach(item => {
     });
 });
 
-// Update viewport for mobile devices
-function updateViewport() {
-    const viewport = document.querySelector('meta[name="viewport"]');
-    if (window.innerWidth <= 768) {
-        viewport.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no');
-    } else {
-        viewport.setAttribute('content', 'width=device-width, initial-scale=1.0');
-    }
-}
-
-// Call on load and resize
-updateViewport();
-window.addEventListener('resize', updateViewport);
-
-// Add mobile menu button HTML (add this inside <body>):
-/*
-<button class="mobile-menu-toggle hidden" onclick="toggleMobileMenu()">
-    <i class="fas fa-bars"></i>
-</button>
-*/
-    </script>
-</body>
+console.log('Admin Portal loaded successfully with API integration');
+</script>
+ </body>   
 
 </html>
+
